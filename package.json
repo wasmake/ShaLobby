@@ -1,0 +1,41 @@
+{
+  "name": "shalobby",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "shamooc",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "doctor": "shamoo doctor",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --project tsconfig.json --pretty false"
+  },
+  "dependencies": {
+    "@shamoo/commands": "0.1.0-rc.1",
+    "@shamoo/decorators": "0.1.0-rc.1",
+    "@shamoo/lifecycle": "0.1.0-rc.1",
+    "@shamoo/paper": "0.1.0-rc.1",
+    "@shamoo/paper-raw": "0.1.0-rc.1",
+    "@shamoo/scheduler": "0.1.0-rc.1",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@shamoo/cli": "0.1.0-rc.1",
+    "@types/node": "22.16.5",
+    "eslint": "10.0.1",
+    "prettier": "3.6.2",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.65.0",
+    "vitest": "3.2.7"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "packageManager": "pnpm@11.15.0"
+}

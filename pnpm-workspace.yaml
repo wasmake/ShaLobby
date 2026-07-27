@@ -1,0 +1,10 @@
+packages:
+  - .
+
+autoInstallPeers: false
+engineStrict: true
+saveExact: true
+strictPeerDependencies: true
+
+allowBuilds:
+  esbuild: true

@@ -1,0 +1,32 @@
+{
+  "name": "shalobby",
+  "displayName": "ShaLobby",
+  "version": "0.1.0",
+  "platforms": ["paper"],
+  "entrypoint": "src/paper.ts",
+  "paperEntrypoint": "src/paper.ts",
+  "tsconfig": "tsconfig.json",
+  "outDir": "dist",
+  "permissions": {
+    "builtins": [],
+    "filesystem": {
+      "read": [],
+      "write": []
+    },
+    "network": false,
+    "workers": false,
+    "childProcess": false,
+    "nativeAddons": false
+  },
+  "communication": {
+    "services": [],
+    "events": [],
+    "consumers": []
+  },
+  "compatibility": {
+    "api": "^0.1.0",
+    "runtime": "^0.1.0",
+    "minecraft": "1.21.8",
+    "paperApi": "1.21.8"
+  }
+}
