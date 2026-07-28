@@ -74,6 +74,7 @@ export type ManagedLobbyFailure = ManagedLobbyDataRecord & {
 };
 
 export type ManagedLobbyResult = ManagedLobbySuccess | ManagedLobbyFailure;
+/** Returns a copied, bounded result envelope. Injected transports must uphold the same contract. */
 export type ManagedLobbyTransport = (request: ManagedLobbyRequest) => Promise<ManagedLobbyResult>;
 
 type ManagedLobbyFile = (typeof MANAGED_LOBBY_FILES)[number];
@@ -557,9 +558,9 @@ function responseMessage(value: unknown, path: string): string {
 function responseCoordinate(value: unknown, path: string): ManagedLobbyCoordinate {
   const coordinate = responseRecord(value, path);
   responseExact(coordinate, ['x', 'y', 'z'], path);
-  responseNumber(coordinate['x'], `${path}.x`, -30_000_000, 30_000_000);
-  responseNumber(coordinate['y'], `${path}.y`, -2_048, 2_048);
-  responseNumber(coordinate['z'], `${path}.z`, -30_000_000, 30_000_000);
+  responseInteger(coordinate['x'], `${path}.x`, -30_000_000, 30_000_000);
+  responseInteger(coordinate['y'], `${path}.y`, -2_048, 2_048);
+  responseInteger(coordinate['z'], `${path}.z`, -30_000_000, 30_000_000);
   return coordinate as unknown as ManagedLobbyCoordinate;
 }
 
@@ -828,19 +829,19 @@ function validatePortalMutationSuccess(
     ) {
       invalidResponse('Managed-lobby portal-create destination does not match the request.');
     }
-    if (action.permission !== undefined && portal.permission !== action.permission) {
+    if (portal.permission !== action.permission) {
       invalidResponse('Managed-lobby portal-create permission does not match the request.');
     }
-    if (action.priority !== undefined && portal.priority !== action.priority) {
+    if (portal.priority !== (action.priority ?? 0)) {
       invalidResponse('Managed-lobby portal-create priority does not match the request.');
     }
     if (action['cooldown-ms'] !== undefined && portal['cooldown-ms'] !== action['cooldown-ms']) {
       invalidResponse('Managed-lobby portal-create cooldown does not match the request.');
     }
-    if (action.enabled !== undefined && portal.enabled !== action.enabled) {
+    if (portal.enabled !== (action.enabled ?? true)) {
       invalidResponse('Managed-lobby portal-create enabled state does not match the request.');
     }
-    if (action.visualize !== undefined && portal.visualize !== action.visualize) {
+    if (portal.visualize !== (action.visualize ?? false)) {
       invalidResponse('Managed-lobby portal-create visualization does not match the request.');
     }
   }
@@ -973,9 +974,7 @@ export class ManagedLobbyClient {
   public constructor(private readonly transport: ManagedLobbyTransport = paperManagedLobby) {}
 
   private async request(request: ManagedLobbyRequest): Promise<ManagedLobbySuccess> {
-    const result = validateResult(
-      copiedData(await this.transport(request), 'Managed-lobby client result'),
-    );
+    const result = await this.transport(request);
     if (!result.ok) throw new ManagedLobbyHostError(result.state, result.error);
     return result;
   }

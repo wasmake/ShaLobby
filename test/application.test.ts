@@ -177,4 +177,23 @@ particles: []
     );
     expect(messages.render('command-error')).toContain('No se pudo completar');
   });
+
+  it('bounds rendered substitutions and uses the command-error fallback with the configured prefix', () => {
+    const messages = new MessageCatalog();
+    const repeatedIds = '%ids%'.repeat(800);
+    messages.replace(`
+messages:
+  prefix: '<gold>[Lobby]</gold> '
+  portal-list: '${repeatedIds}'
+  command-error: '${repeatedIds}'
+`);
+    const values = { ids: 'portal-'.repeat(80) };
+    const fallback = messages.render('missing-message');
+
+    expect(messages.render('portal-list', values)).toBe(fallback);
+    expect(messages.render('command-error', values)).toBe(fallback);
+    expect(fallback).toContain('<gold>[Lobby]</gold>');
+    expect(fallback).toContain('No se pudo completar');
+    expect(fallback.length).toBeLessThanOrEqual(32_767);
+  });
 });

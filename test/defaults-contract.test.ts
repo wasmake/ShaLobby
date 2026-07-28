@@ -7,7 +7,6 @@ import { promisify } from 'node:util';
 import { parseDocument } from 'yaml';
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_MENU_IDS, DEFAULT_PORTAL_IDS, DEFAULT_SERVER_IDS } from '../src/commands.js';
 import { COMMAND_MESSAGE_FALLBACKS } from '../src/messages.js';
 
 const DEFAULT_FILES = Object.freeze([
@@ -27,6 +26,25 @@ const RUNTIME_DEFAULTS = process.env['SHALOBBY_RUNTIME_DEFAULTS_DIR'];
 const ID = /^[a-z][a-z0-9_-]{0,63}$/u;
 const PLACEHOLDER = /%[a-z][a-z0-9_-]{0,63}%/gu;
 const executeFile = promisify(execFile);
+const DEFAULT_MENU_IDS = Object.freeze([
+  'game-selector',
+  'lobby-selector',
+  'profile',
+  'settings',
+] as const);
+const DEFAULT_SERVER_IDS = Object.freeze([
+  'survival',
+  'skyblock',
+  'minigames',
+  'lobby-1',
+  'lobby-2',
+  'lobby-3',
+] as const);
+const DEFAULT_PORTAL_IDS = Object.freeze([
+  'portal-survival',
+  'portal-skyblock',
+  'portal-minigames',
+] as const);
 const DIST_FILES = Object.freeze(['index.js', 'index.js.map', 'shamoo-plugin.json'] as const);
 const SCOREBOARD_PLACEHOLDERS = Object.freeze([
   '%online%',
@@ -56,6 +74,8 @@ const NATIVE_MESSAGE_KEYS = new Set([
   'visibilidad-actualizada',
   'transferencia-iniciada',
   'transferencia-espera',
+  'item-cooldown',
+  'portal-cooldown',
   'servidor-no-disponible',
   'portal-varita',
   'portal-seleccion-incompleta',
@@ -247,6 +267,22 @@ describe('managed lobby defaults contract', () => {
     );
 
     expect(commandDefaults).toEqual(COMMAND_MESSAGE_FALLBACKS);
+  });
+
+  it('keeps native cooldown feedback distinct from command fallbacks', async () => {
+    const messages = mapping(
+      (await readDefaults())['messages.yml']['messages'],
+      'messages.yml.messages',
+    );
+
+    expect(messages['item-cooldown']).toBe(
+      '<#303746>◆</#303746> <#FFB347>Espera <#F8FAFC>%seconds%</#F8FAFC> s antes de volver a usar este objeto.</#FFB347>',
+    );
+    expect(messages['portal-cooldown']).toBe(
+      '<#303746>◆</#303746> <#FFB347>Espera <#F8FAFC>%seconds%</#F8FAFC> s antes de volver a usar este portal.</#FFB347>',
+    );
+    expect(COMMAND_MESSAGE_FALLBACKS).not.toHaveProperty('item-cooldown');
+    expect(COMMAND_MESSAGE_FALLBACKS).not.toHaveProperty('portal-cooldown');
   });
 
   it('ships an exact 15-line sidebar using only all supported Runtime placeholders', async () => {

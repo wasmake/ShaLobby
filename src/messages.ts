@@ -6,6 +6,7 @@ const MESSAGE_ID = /^[a-z][a-z0-9_-]{0,63}$/u;
 const PLACEHOLDER = /%([a-z][a-z0-9_-]{0,63})%/gu;
 const MAX_MESSAGES = 256;
 const MAX_MESSAGE_LENGTH = 4_096;
+const MAX_RENDERED_MESSAGE_LENGTH = 32_767;
 
 export const COMMAND_MESSAGE_FALLBACKS = Object.freeze({
   prefix:
@@ -20,18 +21,19 @@ export const COMMAND_MESSAGE_FALLBACKS = Object.freeze({
   'spawn-set': '%prefix%<#55FF88>Punto de aparición actualizado.</#55FF88>',
   'reload-complete': '%prefix%<#55FF88>Configuración recargada correctamente.</#55FF88>',
   'items-given':
-    '%prefix%<#55FF88>Objetos del lobby entregados a <#F8FAFC>%player%</#F8FAFC>.</#55FF88>',
+    '%prefix%<#55FF88>Barra rápida administrada restaurada para <#F8FAFC>%player%</#F8FAFC>.</#55FF88>',
   'items-reset':
-    '%prefix%<#55FF88>Objetos del lobby restaurados para <#F8FAFC>%player%</#F8FAFC>.</#55FF88>',
+    '%prefix%<#55FF88>Barra rápida administrada restaurada para <#F8FAFC>%player%</#F8FAFC>.</#55FF88>',
   'menu-opened':
     '%prefix%<#55FF88>Menú <#F8FAFC>%menu%</#F8FAFC> abierto para <#F8FAFC>%player%</#F8FAFC>.</#55FF88>',
   'portal-wand':
     '%prefix%<#55FF88>Varita de portales entregada.</#55FF88> <#A8B3C7>La edición también requiere <#F8FAFC>lobby.protection.bypass</#F8FAFC>.</#A8B3C7>',
   'portal-created': '%prefix%<#55FF88>Portal <#F8FAFC>%portal%</#F8FAFC> creado.</#55FF88>',
   'portal-deleted': '%prefix%<#FFB347>Portal <#F8FAFC>%portal%</#F8FAFC> eliminado.</#FFB347>',
-  'portal-list': '%prefix%<#A8B3C7>Portales configurados: <#F8FAFC>%count%</#F8FAFC>.</#A8B3C7>',
+  'portal-list':
+    '%prefix%<#A8B3C7>Portales configurados (<#F8FAFC>%count%</#F8FAFC>): <#F8FAFC>%ids%</#F8FAFC>.</#A8B3C7>',
   'portal-info':
-    '%prefix%<#A8B3C7>Portal <#F8FAFC>%portal%</#F8FAFC>: activo=<#F8FAFC>%enabled%</#F8FAFC>, destino=<#F8FAFC>%destination%</#F8FAFC>.</#A8B3C7>',
+    '%prefix%<#A8B3C7>Portal <#F8FAFC>%portal%</#F8FAFC>: mundo=<#F8FAFC>%world%</#F8FAFC>, min=<#F8FAFC>%minimum%</#F8FAFC>, max=<#F8FAFC>%maximum%</#F8FAFC>, permiso=<#F8FAFC>%permission%</#F8FAFC>, prioridad=<#F8FAFC>%priority%</#F8FAFC>, cooldown=<#F8FAFC>%cooldown% ms</#F8FAFC>, visualización=<#F8FAFC>%visualization%</#F8FAFC>, activo=<#F8FAFC>%enabled%</#F8FAFC>, destino=<#F8FAFC>%destination%</#F8FAFC>.</#A8B3C7>',
   'portal-enabled': '%prefix%<#55FF88>Portal <#F8FAFC>%portal%</#F8FAFC> activado.</#55FF88>',
   'portal-disabled': '%prefix%<#FFB347>Portal <#F8FAFC>%portal%</#F8FAFC> desactivado.</#FFB347>',
   'portal-pos1':
@@ -131,6 +133,24 @@ function escapeMiniMessage(value: boolean | number | string): string {
   return String(value).replaceAll('\\', '\\\\').replaceAll('<', '\\<');
 }
 
+function renderTemplate(template: string, prefix: string, values: MessageValues): string {
+  return template.replace(PLACEHOLDER, (token: string, name: string) => {
+    if (name === 'prefix') return prefix;
+    const value = values[name];
+    return value === undefined ? token : escapeMiniMessage(value);
+  });
+}
+
+function renderedFallback(prefix: string): string {
+  const fallback = renderTemplate(COMMAND_MESSAGE_FALLBACKS['command-error'], prefix, {});
+  if (fallback.length <= MAX_RENDERED_MESSAGE_LENGTH) return fallback;
+  return renderTemplate(
+    COMMAND_MESSAGE_FALLBACKS['command-error'],
+    COMMAND_MESSAGE_FALLBACKS.prefix,
+    {},
+  );
+}
+
 export class MessageCatalog {
   #configured: Readonly<Record<string, string>> = Object.freeze({});
 
@@ -147,10 +167,7 @@ export class MessageCatalog {
     const template =
       this.#configured[key] ?? FALLBACK_MESSAGES[key] ?? COMMAND_MESSAGE_FALLBACKS['command-error'];
     const prefix = configuredPrefix ?? COMMAND_MESSAGE_FALLBACKS.prefix;
-    return template.replace(PLACEHOLDER, (token: string, name: string) => {
-      if (name === 'prefix') return prefix;
-      const value = values[name];
-      return value === undefined ? token : escapeMiniMessage(value);
-    });
+    const rendered = renderTemplate(template, prefix, values);
+    return rendered.length <= MAX_RENDERED_MESSAGE_LENGTH ? rendered : renderedFallback(prefix);
   }
 }

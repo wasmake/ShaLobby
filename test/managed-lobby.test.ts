@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe('internal managed-lobby adapter', () => {
-  it('sends one validated frozen copy and copies and freezes the Runtime result', async () => {
+  it('sends one validated frozen copy and applies one copied result boundary', async () => {
     const request: ManagedLobbyRequest = {
       operation: 'execute',
       action: 'portal-remove',
@@ -75,6 +75,19 @@ describe('internal managed-lobby adapter', () => {
     expect(
       Object.isFrozen((result['portal'] as { readonly bounds: readonly number[] }).bounds),
     ).toBe(true);
+  });
+
+  it('does not deep-copy a result already bounded by an injected transport', async () => {
+    const response = Object.freeze({
+      ok: true as const,
+      state: 'spawn-requested',
+      player: PLAYER,
+    });
+    const client = new ManagedLobbyClient(() => Promise.resolve(response));
+
+    const result = await client.execute({ action: 'spawn', player: PLAYER });
+
+    expect(result).toBe(response);
   });
 
   it('accepts exact server, spawn, and menu portal destination requests', async () => {
@@ -261,6 +274,15 @@ describe('internal managed-lobby adapter', () => {
         new ManagedLobbyClient(() =>
           Promise.resolve({
             ok: true,
+            state: 'portal-info',
+            portal: portalData({ min: { x: 0.5, y: 64, z: 0 } }),
+            message: 'Fraccionario',
+          }),
+        ).execute({ action: 'portal-info', id: 'main' }),
+      () =>
+        new ManagedLobbyClient(() =>
+          Promise.resolve({
+            ok: true,
             state: 'portal-pos1',
             position: { world: 'world', x: '?', y: 64, z: 0 },
             message: 'Posición',
@@ -325,16 +347,28 @@ describe('internal managed-lobby adapter', () => {
       await expect(client.execute(action)).rejects.toBeInstanceOf(ManagedLobbyResponseError);
     }
 
-    const omitted = new ManagedLobbyClient(() =>
-      Promise.resolve(
-        response(
-          portalData({ destination: 'survival', action: { type: 'connect', target: 'survival' } }),
-        ),
-      ),
-    );
+    const defaults = portalData({ 'cooldown-ms': 9_876 });
+    const omitted = { action: 'portal-create', player: PLAYER, id: 'main' } as const;
     await expect(
-      omitted.execute({ action: 'portal-create', player: PLAYER, id: 'main' }),
-    ).rejects.toBeInstanceOf(ManagedLobbyResponseError);
+      new ManagedLobbyClient(() => Promise.resolve(response(defaults))).execute(omitted),
+    ).resolves.toMatchObject({ state: 'portal-created' });
+
+    const malformedDefaults = [
+      portalData({ ...defaults, permission: 'lobby.portal.main' }),
+      portalData({ ...defaults, priority: 1 }),
+      portalData({ ...defaults, enabled: false }),
+      portalData({ ...defaults, visualize: true }),
+      portalData({ ...defaults, action: { type: 'spawn' } }),
+      portalData({
+        ...defaults,
+        destination: 'survival',
+        action: { type: 'connect', target: 'survival' },
+      }),
+    ];
+    for (const portal of malformedDefaults) {
+      const client = new ManagedLobbyClient(() => Promise.resolve(response(portal)));
+      await expect(client.execute(omitted)).rejects.toBeInstanceOf(ManagedLobbyResponseError);
+    }
   });
 
   it('rejects hostile graphs without invoking accessors', () => {
@@ -356,6 +390,16 @@ describe('internal managed-lobby adapter', () => {
     expect(() => paperManagedLobby({ operation: 'status' })).toThrow(ManagedLobbyProtocolError);
 
     installHost(() => Promise.resolve({ ok: true, state: 'ready', error: 'not allowed' }));
+    await expect(paperManagedLobby({ operation: 'status' })).rejects.toBeInstanceOf(
+      ManagedLobbyProtocolError,
+    );
+
+    installHost(() => Promise.resolve({ ok: false, state: 'invalid' }));
+    await expect(paperManagedLobby({ operation: 'status' })).rejects.toBeInstanceOf(
+      ManagedLobbyProtocolError,
+    );
+
+    installHost(() => Promise.resolve({ ok: false, state: 'invalid', error: 'x'.repeat(513) }));
     await expect(paperManagedLobby({ operation: 'status' })).rejects.toBeInstanceOf(
       ManagedLobbyProtocolError,
     );

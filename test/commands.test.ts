@@ -1,3 +1,5 @@
+import { readdir, readFile } from 'node:fs/promises';
+
 import type { CommandSender, Player } from '@shamoo/commands';
 import type { PaperCommandContext, TextLike } from '@shamoo/paper';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -140,7 +142,7 @@ function successfulResponse(request: ManagedLobbyRequest): Readonly<Record<strin
           ...(request.permission === undefined ? {} : { permission: request.permission }),
           priority: request.priority ?? 0,
           'cooldown-ms': request['cooldown-ms'] ?? 2_500,
-          visualize: request.visualize ?? true,
+          visualize: request.visualize ?? false,
         },
         message: 'Portal creado.',
       };
@@ -205,6 +207,10 @@ function replyContent(reply: TextLike | undefined): string {
   return reply?.content ?? '';
 }
 
+function replyText(reply: TextLike | undefined): string {
+  return replyContent(reply).replaceAll(/<[^>]*>/gu, '');
+}
+
 beforeEach(() => {
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -217,6 +223,37 @@ afterEach(() => {
 });
 
 describe('managed lobby commands', () => {
+  it('uses concise compiler-inferred command bindings without parser or stale suggestion metadata', async () => {
+    const sourceDirectory = new URL('../src/', import.meta.url);
+    const source = (
+      await Promise.all(
+        (await readdir(sourceDirectory, { recursive: true }))
+          .filter((file) => file.endsWith('.ts'))
+          .map((file) => readFile(new URL(file, sourceDirectory), 'utf8')),
+      )
+    ).join('\n');
+
+    expect(source).not.toMatch(/\bparser\s*:/u);
+    expect(source).not.toMatch(/\bsuggestions\s*:/u);
+    expect(source.match(/\baliases\s*:/gu)).toHaveLength(5);
+    expect(source).toContain("@Argument('player') player: Player");
+    expect(source.match(/@Argument\('player'\) player\?: Player/gu)).toHaveLength(3);
+    expect(source).toContain("@Option('priority', { aliases: ['r'] }) priority?: number");
+    expect(source).toContain("@Option('enabled', { aliases: ['e'] }) enabled?: boolean");
+    expect(source).toContain("@Argument('enabled') enabled: boolean");
+  });
+
+  it('models omitted portal visualization with the native false default', () => {
+    const response = successfulResponse({
+      operation: 'execute',
+      action: 'portal-create',
+      player: SELF,
+      id: 'main',
+    });
+
+    expect(response['portal']).toMatchObject({ visualize: false });
+  });
+
   it('sends exact Runtime actions for player, item, menu, and portal commands', async () => {
     const requests: ManagedLobbyRequest[] = [];
     installHost((request) => {
@@ -234,21 +271,21 @@ describe('managed lobby commands', () => {
     await spawn.hub(self.context);
     await spawn.spawnPlayer(target, self.context);
     await spawn.setSpawn(self.context);
-    await admin.giveItems(undefined, self.context);
-    await admin.resetItems(target, self.context);
-    await admin.openMenu('game-selector', target, self.context);
+    await admin.giveItems(self.context);
+    await admin.resetItems(self.context, target);
+    await admin.openMenu('game-selector', self.context, target);
     await portals.wand(self.context);
     await portals.setPositionOne(self.context);
     await portals.setPositionTwo(self.context);
     await portals.create(
       'main',
+      self.context,
       'survival',
       'lobby.portal.survival',
       10,
       1_500,
       true,
       false,
-      self.context,
     );
     await portals.delete('main', self.context);
     await portals.list(self.context);
@@ -317,6 +354,18 @@ describe('managed lobby commands', () => {
     expect(self.replies).toHaveLength(requests.length);
     expect(replyContent(self.replies[9])).toContain('world');
     expect(replyContent(self.replies[9])).toContain('10, 64, -2');
+    expect(replyText(self.replies[13])).toContain('portal-one, portal-two');
+    expect(replyText(self.replies[13])).toContain('(2)');
+    const info = replyText(self.replies[14]);
+    expect(info).toContain('mundo=world');
+    expect(info).toContain('min=0, 64, 0');
+    expect(info).toContain('max=1, 65, 1');
+    expect(info).toContain('permiso=ninguna');
+    expect(info).toContain('prioridad=0');
+    expect(info).toContain('cooldown=1000 ms');
+    expect(info).toContain('visualización=false');
+    expect(info).toContain('activo=true');
+    expect(info).toContain('servidor survival');
   });
 
   it('uses exact correlated reload and status requests', async () => {
@@ -343,6 +392,68 @@ describe('managed lobby commands', () => {
     expect(replyContent(fake.replies[2])).toContain('Diagnóstico');
     expect(replyContent(fake.replies[2])).toContain('/srv/paper');
     expect(replyContent(fake.replies[2])).toContain('123e4567-e89b-12d3-a456-426614174099');
+  });
+
+  it('shows bounded diagnostics for uninitialized Runtime state without exposing the directory in status', async () => {
+    installHost((request) => {
+      if (request.operation !== 'status') {
+        return Promise.resolve({ ok: false, state: 'invalid', error: 'unexpected request' });
+      }
+      return Promise.resolve({
+        ok: true,
+        state: 'uninitialized',
+        active: false,
+        invocationAdmissionOpen: false,
+        pendingActions: 1,
+        maximumPendingActions: 64,
+        directory: '/srv/paper/plugins/ShamooRuntime/data/shalobby',
+        generation: '123e4567-e89b-12d3-a456-426614174099',
+        files: MANAGED_LOBBY_FILES,
+      });
+    });
+    const fake = commandContext({ kind: 'console', name: 'Console' });
+    const commands = new LobbyAdministrationCommands();
+
+    await commands.status(fake.context);
+    await commands.debug(fake.context);
+
+    const status = replyText(fake.replies[0]);
+    const debug = replyText(fake.replies[1]);
+    expect(status).toContain('uninitialized');
+    expect(status).toContain('pendientes=1/64');
+    expect(status.match(/n\/a/gu)).toHaveLength(5);
+    expect(status).not.toContain('/srv/paper');
+    expect(status).not.toContain('123e4567-e89b-12d3-a456-426614174099');
+    expect(debug).toContain('uninitialized');
+    expect(debug).toContain('pendientes=1/64');
+    expect(debug.match(/n\/a/gu)).toHaveLength(5);
+    expect(debug).toContain('/srv/paper');
+    expect(debug).toContain('123e4567-e89b-12d3-a456-426614174099');
+  });
+
+  it('lists a truthful bounded prefix of portal IDs with the complete count', async () => {
+    const portals = Array.from({ length: 20 }, (_, index) =>
+      portalData(`portal-${String(index).padStart(2, '0')}-${'a'.repeat(48)}`),
+    );
+    installHost(() =>
+      Promise.resolve({
+        ok: true,
+        state: 'portal-list',
+        portals,
+        count: portals.length,
+        message: 'Lista.',
+      }),
+    );
+    const fake = commandContext();
+
+    await new LobbyPortalCommands().list(fake.context);
+
+    const content = replyText(fake.replies[0]);
+    expect(content).toContain('(20)');
+    expect(content).toContain('portal-00-');
+    expect(content).not.toContain('portal-19-');
+    expect(content).toMatch(/\.\.\. \(\+\d+ más\)/u);
+    expect(content.length).toBeLessThan(800);
   });
 
   it('derives bounded portal info destinations from native actions when legacy destination is null', async () => {
@@ -443,13 +554,13 @@ describe('managed lobby commands', () => {
     await new LobbySpawnCommands().lobby(fake.context);
     await new LobbyPortalCommands().create(
       'main',
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
       fake.context,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
     );
     await new LobbyPortalCommands().visualize(true, fake.context);
 
@@ -470,36 +581,36 @@ describe('managed lobby commands', () => {
     const target: Player = { id: TARGET, name: 'Steve', online: true };
     const portals = new LobbyPortalCommands();
 
-    await new LobbyAdministrationCommands().openMenu('Not Valid', target, fake.context);
+    await new LobbyAdministrationCommands().openMenu('Not Valid', fake.context, target);
     await portals.create(
       'main',
+      fake.context,
       undefined,
       'invalid permission',
       undefined,
       undefined,
       undefined,
       undefined,
-      fake.context,
     );
     await portals.create(
       'main',
+      fake.context,
       undefined,
       undefined,
       1.5,
       undefined,
       undefined,
       undefined,
-      fake.context,
     );
     await portals.create(
       'main',
+      fake.context,
       undefined,
       undefined,
       undefined,
       600_001,
       undefined,
       undefined,
-      fake.context,
     );
     await portals.setSpawnDestination('Not Valid', fake.context);
     await portals.setServerDestination('main', 'Not-Canonical', fake.context);
@@ -523,7 +634,7 @@ describe('managed lobby commands', () => {
     await new LobbyPortalCommands().list(fake.context);
 
     expect(replyContent(fake.replies[0])).toContain('No se pudo completar');
-    expect(replyContent(fake.replies[0])).not.toContain('Portales configurados: 0');
+    expect(replyContent(fake.replies[0])).not.toContain('Portales configurados (0)');
     expect(vi.mocked(console.info).mock.calls.flat().join(' ')).not.toContain('command-succeeded');
   });
 
@@ -532,7 +643,7 @@ describe('managed lobby commands', () => {
     installHost(operation);
     const fake = commandContext({ kind: 'console', name: 'Console' });
 
-    await new LobbyAdministrationCommands().giveItems(undefined, fake.context);
+    await new LobbyAdministrationCommands().giveItems(fake.context);
 
     expect(operation).not.toHaveBeenCalled();
     expect(replyContent(fake.replies[0])).toContain('necesita un jugador válido');

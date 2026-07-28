@@ -18,36 +18,12 @@ import type { CommandMessageKey, MessageValues } from './messages.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const ID = /^[a-z][a-z0-9_-]{0,63}$/u;
 const PERMISSION = /^[A-Za-z0-9._-]{1,128}$/u;
-
-export const DEFAULT_MENU_IDS = Object.freeze([
-  'game-selector',
-  'lobby-selector',
-  'profile',
-  'settings',
-] as const);
-export const DEFAULT_SERVER_IDS = Object.freeze([
-  'survival',
-  'skyblock',
-  'minigames',
-  'lobby-1',
-  'lobby-2',
-  'lobby-3',
-] as const);
-export const DEFAULT_PORTAL_IDS = Object.freeze([
-  'portal-survival',
-  'portal-skyblock',
-  'portal-minigames',
-] as const);
+const MAX_PORTAL_ID_LIST_LENGTH = 512;
 
 interface CommandReply {
   readonly key: CommandMessageKey;
   readonly values?: MessageValues;
 }
-
-type InitializedStatus = Extract<
-  ManagedLobbyStatusSuccess,
-  { readonly state: 'ready' | 'standby' }
->;
 
 class PlayerContextError extends Error {
   public constructor() {
@@ -188,9 +164,32 @@ function portalInfo(result: ManagedLobbyPortalInfoSuccess): MessageValues {
   const { portal } = result;
   return {
     portal: portal.id,
+    world: portal.world,
+    minimum: `${String(portal.min.x)}, ${String(portal.min.y)}, ${String(portal.min.z)}`,
+    maximum: `${String(portal.max.x)}, ${String(portal.max.y)}, ${String(portal.max.z)}`,
+    permission: portal.permission ?? 'ninguna',
+    priority: portal.priority,
+    cooldown: portal['cooldown-ms'],
+    visualization: portal.visualize,
     enabled: portal.enabled,
     destination: portalDestination(portal),
   };
+}
+
+function portalIdList(portals: readonly ManagedLobbyPortal[]): string {
+  if (portals.length === 0) return 'ninguno';
+  const ids = portals.map((portal) => portal.id);
+  const complete = ids.join(', ');
+  if (complete.length <= MAX_PORTAL_ID_LIST_LENGTH) return complete;
+
+  const visible = [...ids];
+  let result: string;
+  do {
+    visible.pop();
+    const omitted = ids.length - visible.length;
+    result = `${visible.join(', ')}, ... (+${String(omitted)} más)`;
+  } while (result.length > MAX_PORTAL_ID_LIST_LENGTH && visible.length > 1);
+  return result;
 }
 
 function portalPosition(result: ManagedLobbyPortalPositionSuccess): MessageValues {
@@ -203,18 +202,19 @@ function portalPosition(result: ManagedLobbyPortalPositionSuccess): MessageValue
   };
 }
 
-function statusValues(result: InitializedStatus, detailed: boolean): MessageValues {
+function statusValues(result: ManagedLobbyStatusSuccess, detailed: boolean): MessageValues {
+  const initialized = result.state !== 'uninitialized';
   return {
     state: result.state,
     active: result.active,
     admission: result.invocationAdmissionOpen,
     pending: result.pendingActions,
     maximum: result.maximumPendingActions,
-    spawn: result.spawnConfigured,
-    items: result.items,
-    menus: result.menus,
-    servers: result.servers,
-    portals: result.portals,
+    spawn: initialized ? result.spawnConfigured : 'n/a',
+    items: initialized ? result.items : 'n/a',
+    menus: initialized ? result.menus : 'n/a',
+    servers: initialized ? result.servers : 'n/a',
+    portals: initialized ? result.portals : 'n/a',
     ...(detailed
       ? {
           directory: result.directory,
@@ -259,7 +259,7 @@ export class LobbySpawnCommands {
     sender: 'any',
   })
   public async spawnPlayer(
-    @Argument('player', { parser: 'player', suggestions: ['players'] }) player: Player,
+    @Argument('player') player: Player,
     @Context() context: PaperCommandContext,
   ): Promise<void> {
     await runCommand(context, 'lobby spawn', () =>
@@ -303,13 +303,13 @@ export class LobbyAdministrationCommands {
   }
 
   @Subcommand('lobby', 'items give [player]', {
-    description: 'Entregar los objetos configurados del lobby.',
+    description: 'Restaurar la barra rápida administrada configurada.',
     permission: 'lobby.command.items',
     sender: 'any',
   })
   public async giveItems(
-    @Argument('player', { parser: 'player', suggestions: ['players'] }) player: Player | undefined,
     @Context() context: PaperCommandContext,
+    @Argument('player') player?: Player,
   ): Promise<void> {
     await runCommand(context, 'lobby items give', () =>
       execute(
@@ -320,13 +320,13 @@ export class LobbyAdministrationCommands {
   }
 
   @Subcommand('lobby', 'items reset [player]', {
-    description: 'Restaurar los objetos configurados del lobby.',
+    description: 'Restaurar la barra rápida administrada configurada.',
     permission: 'lobby.command.items',
     sender: 'any',
   })
   public async resetItems(
-    @Argument('player', { parser: 'player', suggestions: ['players'] }) player: Player | undefined,
     @Context() context: PaperCommandContext,
+    @Argument('player') player?: Player,
   ): Promise<void> {
     await runCommand(context, 'lobby items reset', () =>
       execute(
@@ -342,12 +342,9 @@ export class LobbyAdministrationCommands {
     sender: 'any',
   })
   public async openMenu(
-    @Argument('menu', {
-      suggestions: ['game-selector', 'lobby-selector', 'profile', 'settings'],
-    })
-    menu: string,
-    @Argument('player', { parser: 'player', suggestions: ['players'] }) player: Player | undefined,
+    @Argument('menu') menu: string,
     @Context() context: PaperCommandContext,
+    @Argument('player') player?: Player,
   ): Promise<void> {
     await runCommand(context, 'lobby menu open', () => {
       const id = inputId(menu);
@@ -386,7 +383,6 @@ export class LobbyAdministrationCommands {
   ): Promise<void> {
     await runCommand(context, command, async () => {
       const result = await shaLobbyApplication.managedLobby.status();
-      if (result.state === 'uninitialized') return { key: 'unavailable' };
       return { key, values: statusValues(result, key === 'debug') };
     });
   }
@@ -427,41 +423,14 @@ export class LobbyPortalCommands {
     sender: 'player',
   })
   public async create(
-    @Argument('portal', {
-      suggestions: ['portal-survival', 'portal-skyblock', 'portal-minigames'],
-    })
-    portal: string,
-    @Argument('server', {
-      suggestions: ['survival', 'skyblock', 'minigames', 'lobby-1', 'lobby-2', 'lobby-3'],
-    })
-    server: string | undefined,
-    @Option('permission', {
-      aliases: ['p'],
-      parser: 'string',
-      suggestions: ['lobby.portal.survival'],
-    })
-    permission: string | undefined,
-    @Option('priority', { aliases: ['r'], parser: 'integer', suggestions: ['0', '10'] })
-    priority: number | undefined,
-    @Option('cooldown', {
-      aliases: ['c'],
-      parser: 'integer',
-      suggestions: ['0', '1500', '3000'],
-    })
-    cooldown: number | undefined,
-    @Option('enabled', {
-      aliases: ['e'],
-      parser: 'boolean',
-      suggestions: ['true', 'false'],
-    })
-    enabled: boolean | undefined,
-    @Option('visualize', {
-      aliases: ['v'],
-      parser: 'boolean',
-      suggestions: ['true', 'false'],
-    })
-    visualize: boolean | undefined,
+    @Argument('portal') portal: string,
     @Context() context: PaperCommandContext,
+    @Argument('server') server?: string,
+    @Option('permission', { aliases: ['p'] }) permission?: string,
+    @Option('priority', { aliases: ['r'] }) priority?: number,
+    @Option('cooldown', { aliases: ['c'] }) cooldown?: number,
+    @Option('enabled', { aliases: ['e'] }) enabled?: boolean,
+    @Option('visualize', { aliases: ['v'] }) visualize?: boolean,
   ): Promise<void> {
     await runCommand(context, 'lobby portal create', () => {
       const id = inputId(portal);
@@ -490,10 +459,7 @@ export class LobbyPortalCommands {
     sender: 'player',
   })
   public async delete(
-    @Argument('portal', {
-      suggestions: ['portal-survival', 'portal-skyblock', 'portal-minigames'],
-    })
-    portal: string,
+    @Argument('portal') portal: string,
     @Context() context: PaperCommandContext,
   ): Promise<void> {
     await runCommand(context, 'lobby portal delete', () => {
@@ -513,7 +479,10 @@ export class LobbyPortalCommands {
   public async list(@Context() context: PaperCommandContext): Promise<void> {
     await runCommand(context, 'lobby portal list', async () => {
       const result = await shaLobbyApplication.managedLobby.execute({ action: 'portal-list' });
-      return { key: 'portal-list', values: { count: result.count } };
+      return {
+        key: 'portal-list',
+        values: { count: result.count, ids: portalIdList(result.portals) },
+      };
     });
   }
 
@@ -523,10 +492,7 @@ export class LobbyPortalCommands {
     sender: 'any',
   })
   public async info(
-    @Argument('portal', {
-      suggestions: ['portal-survival', 'portal-skyblock', 'portal-minigames'],
-    })
-    portal: string,
+    @Argument('portal') portal: string,
     @Context() context: PaperCommandContext,
   ): Promise<void> {
     await runCommand(context, 'lobby portal info', async () => {
@@ -545,10 +511,7 @@ export class LobbyPortalCommands {
     sender: 'player',
   })
   public async enable(
-    @Argument('portal', {
-      suggestions: ['portal-survival', 'portal-skyblock', 'portal-minigames'],
-    })
-    portal: string,
+    @Argument('portal') portal: string,
     @Context() context: PaperCommandContext,
   ): Promise<void> {
     await this.portalToggle(context, portal, true);
@@ -560,10 +523,7 @@ export class LobbyPortalCommands {
     sender: 'player',
   })
   public async disable(
-    @Argument('portal', {
-      suggestions: ['portal-survival', 'portal-skyblock', 'portal-minigames'],
-    })
-    portal: string,
+    @Argument('portal') portal: string,
     @Context() context: PaperCommandContext,
   ): Promise<void> {
     await this.portalToggle(context, portal, false);
@@ -575,14 +535,8 @@ export class LobbyPortalCommands {
     sender: 'player',
   })
   public async setServerDestination(
-    @Argument('portal', {
-      suggestions: ['portal-survival', 'portal-skyblock', 'portal-minigames'],
-    })
-    portal: string,
-    @Argument('server', {
-      suggestions: ['survival', 'skyblock', 'minigames', 'lobby-1', 'lobby-2', 'lobby-3'],
-    })
-    server: string,
+    @Argument('portal') portal: string,
+    @Argument('server') server: string,
     @Context() context: PaperCommandContext,
   ): Promise<void> {
     await runCommand(context, 'lobby portal setdestination server', () => {
@@ -607,10 +561,7 @@ export class LobbyPortalCommands {
     sender: 'player',
   })
   public async setSpawnDestination(
-    @Argument('portal', {
-      suggestions: ['portal-survival', 'portal-skyblock', 'portal-minigames'],
-    })
-    portal: string,
+    @Argument('portal') portal: string,
     @Context() context: PaperCommandContext,
   ): Promise<void> {
     await runCommand(context, 'lobby portal setdestination spawn', () => {
@@ -633,14 +584,8 @@ export class LobbyPortalCommands {
     sender: 'player',
   })
   public async setMenuDestination(
-    @Argument('portal', {
-      suggestions: ['portal-survival', 'portal-skyblock', 'portal-minigames'],
-    })
-    portal: string,
-    @Argument('menu', {
-      suggestions: ['game-selector', 'lobby-selector', 'profile', 'settings'],
-    })
-    menu: string,
+    @Argument('portal') portal: string,
+    @Argument('menu') menu: string,
     @Context() context: PaperCommandContext,
   ): Promise<void> {
     await runCommand(context, 'lobby portal setdestination menu', () => {
@@ -665,7 +610,7 @@ export class LobbyPortalCommands {
     sender: 'player',
   })
   public async visualize(
-    @Argument('enabled', { parser: 'boolean', suggestions: ['true', 'false'] }) enabled: boolean,
+    @Argument('enabled') enabled: boolean,
     @Context() context: PaperCommandContext,
   ): Promise<void> {
     await runCommand(context, 'lobby portal visualize', () =>
