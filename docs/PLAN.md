@@ -6,13 +6,13 @@ Ship one coordinated, reproducible ShaLobby release in which the TypeScript plug
 `@shamoo/paper` managed-lobby API, and the Paper ShamooRuntime bridge use the same bounded protocol and
 have been verified together on the supported host.
 
-The ShaLobby implementation and build are complete. The remaining work is coordination,
-cross-repository verification, process certification, and publication. The public `0.1.0-rc.1`
-artifacts must not be relabeled as containing this feature.
+The ShaLobby implementation is complete. The remaining work is coordination, cross-repository
+verification, process certification, and publication. The public `0.1.0-rc.1` artifacts must not be
+relabeled as containing this feature: that compiler also predates inferred command parsers and cannot
+produce the final ShaLobby route descriptors after explicit parser removal.
 
-The coordinated Runtime defaults now match the ShaLobby fixtures byte for byte. That parity remains a
-required release gate, but it is no longer an open blocker. Coordinated Runtime/API publication and
-supported-host certification remain outstanding.
+Runtime and ShaLobby source defaults now match byte for byte. Coordinated compiler/API/Runtime
+publication and supported-host process certification remain outstanding.
 
 ## Status
 
@@ -26,7 +26,8 @@ supported-host certification remain outstanding.
 | ShaLobby lifecycle and serialized message/Runtime reload                                                | Implemented and tested                                           |
 | ShaLobby command surface and exact `lobby.*` permissions                                                | Implemented and tested                                           |
 | ShaLobby bounded internal direct-host adapter                                                           | Implemented and tested for reproducible `rc.1` dependency builds |
-| ShaLobby formatting, lint, typecheck, tests, and three-file build                                       | Passing                                                          |
+| ShaLobby formatting, lint, typecheck, tests, and public-compiler source build                           | Passing                                                          |
+| ShaLobby three-file build with current inferred parsers                                                 | Passing with current local CLI; unpublished                      |
 | Coordinated API/Runtime publication                                                                     | Not present in public `0.1.0-rc.1`                               |
 | Supported-host Paper/proxy certification of the assembled triplet                                       | Required before release                                          |
 | Installable coordinated release with checksums and commit identities                                    | Not yet published                                                |
@@ -71,6 +72,7 @@ ShaLobby currently provides:
 - portal wand, selection, create/delete/list/info/enable/disable, server/spawn/menu destination, and
   visualization routes;
 - exact route permissions under `lobby.command.*`;
+- compiler-inferred command bindings with explicit handler-domain validation;
 - a bounded internal adapter that validates, copies, freezes, and sends data-only requests; and
 - source tests plus an exact defaults contract test.
 

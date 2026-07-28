@@ -7,20 +7,27 @@ requests, and configurable portals.
 
 ## Current Status
 
-The ShaLobby source implementation is complete and `pnpm check` and `pnpm build` pass. The
-coordinated ShamooRuntime bridge and its upstream `@shamoo/paper` API exist in coordinated source
-work, but they have **not** been published in the `0.1.0-rc.1` packages or Runtime release. Installing
-the public `rc.1` Runtime does not provide `host.paperManagedLobby`.
+The ShaLobby source implementation is complete. The coordinated ShamooRuntime bridge, its upstream
+`@shamoo/paper` API, and ShamooTS command-parser inference exist in coordinated source work, but they
+have **not** been published in the `0.1.0-rc.1` packages or Runtime release. Installing the public
+`rc.1` Runtime does not provide `host.paperManagedLobby`, and its compiler does not infer omitted
+command parsers.
 
-This checkout is not independently releasable with the public artifacts. Coordinated source now has the
-matching omission-only bridge contract, correlated `messagesContent`, and byte-identical eight-file
-defaults. The remaining blocker is publication and certification of the coordinated Runtime/API/
-ShaLobby set, not a defaults mismatch.
+This checkout is not independently releasable with the public artifacts. Coordinated source has the
+matching omission-only bridge contract, correlated `messagesContent`, and byte-identical defaults.
+Source parity is complete; coordinated compiler/API/Runtime publication and supported Paper process
+certification remain pending.
 
-For reproducible builds against the published packages, ShaLobby currently carries a bounded
+For reproducible source checks against the published packages, ShaLobby currently carries a bounded
 internal direct-host adapter in `src/managed-lobby.ts`. It validates and copies data-only requests and
-responses before calling `host.paperManagedLobby`. Replace it with the upstream
+applies one copied result boundary around `host.paperManagedLobby`. Replace it with the upstream
 `@shamoo/paper` export only after a matching Runtime and API are published together.
+
+Command declarations intentionally omit explicit parsers. A release build must use the current
+coordinated ShamooTS compiler, which infers `string`, `number`, `boolean`, and `Player`. Public `rc.1`
+`shamooc` can complete `pnpm check` but emits its old descriptor defaults after those parser omissions;
+that output is not the release artifact. Dependency versions remain pinned until the coordinated
+packages are published.
 
 Do not describe this as an `rc.1` deployment. A working server requires a coordinated Runtime build
 that contains the bridge.
@@ -36,8 +43,9 @@ that contains the bridge.
 | Proxy transfers  | Bungee-compatible plugin messaging and matching proxy server names |
 | Development      | Node.js 22 or newer and pnpm 11 or newer                           |
 
-The platform restriction comes from the pinned Javet Node native runtime. Other operating systems,
-architectures, Paper versions, Velocity-only hosting, and the published `rc.1` Runtime are not
+The platform restriction comes from the pinned Javet Node native runtime. This managed-lobby feature
+supports standard Paper 1.21.8 only; generic ShamooRuntime Folia support is unrelated. Other operating
+systems, architectures, Paper versions, Velocity-only hosting, and the published `rc.1` Runtime are not
 supported combinations for ShaLobby.
 
 ## Administrator Quick Start
@@ -87,8 +95,8 @@ With `data-directory: data` and owner `shalobby`, the exact persistent default p
 ```
 
 A changed relative `data-directory` remains under `plugins/ShamooRuntime`; an absolute value uses
-that root. Runtime always appends the owner and rejects a data root beneath the watched
-`plugins.directory`.
+that root. Runtime always appends the owner. The final resolved owner directory and the watched
+`plugins.directory` must not contain or overlap one another in either direction.
 
 ## First-Start Defaults
 
@@ -107,8 +115,8 @@ Runtime ensures exactly these files and never replaces an existing file during `
 
 The checked-in `defaults/` files are the coordinated-release fixture, not an installation step. The
 coordinated Runtime source generates them byte for byte, and the cross-repository parity gate protects
-that match. Review proxy targets, world names, and portal bounds before opening the lobby. The exact
-schema is in [Configuration](docs/CONFIGURATION.md).
+that completed source match. Review proxy targets, world names, and portal bounds before opening the
+lobby. The exact schema is in [Configuration](docs/CONFIGURATION.md).
 
 ## Spawn Semantics
 
@@ -139,8 +147,8 @@ world.
 
 ## Commands
 
-All routes are declared in TypeScript. Player-target arguments use the framework's online-player
-parser.
+All routes are declared in TypeScript. The current compiler infers every command parser from its
+decorated parameter type, including the framework's online-player parser for `Player`.
 
 | Command                                                 | Sender | Permission                   | Result                                                 |
 | ------------------------------------------------------- | ------ | ---------------------------- | ------------------------------------------------------ |
@@ -148,15 +156,15 @@ parser.
 | `/lobby spawn <player>`                                 | Any    | `lobby.command.spawn.others` | Request another online player's spawn teleport         |
 | `/lobby setspawn`                                       | Player | `lobby.command.setspawn`     | Persist the player's current managed-world location    |
 | `/lobby reload`                                         | Any    | `lobby.command.reload`       | Reload all eight files and the command message catalog |
-| `/lobby items give [player]`                            | Any    | `lobby.command.items`        | Restore configured managed items                       |
-| `/lobby items reset [player]`                           | Any    | `lobby.command.items`        | Same native item restoration operation                 |
+| `/lobby items give [player]`                            | Any    | `lobby.command.items`        | Restore the configured managed hotbar                  |
+| `/lobby items reset [player]`                           | Any    | `lobby.command.items`        | Restore the configured managed hotbar                  |
 | `/lobby menu open <menu> [player]`                      | Any    | `lobby.command.menu`         | Open a configured protected menu                       |
 | `/lobby status`, `/lobby debug`                         | Any    | `lobby.command.debug`        | Show admin-only bounded Runtime diagnostics            |
 | `/lobby portal wand`                                    | Player | `lobby.command.portal`       | Give the portal selection wand                         |
 | `/lobby portal setpos1`, `/lobby portal setpos2`        | Player | `lobby.command.portal`       | Capture a selection corner at the player's block       |
 | `/lobby portal create <portal> [server]`                | Player | `lobby.command.portal`       | Persist a selected portal; supports bounded options    |
 | `/lobby portal delete <portal>`                         | Player | `lobby.command.portal`       | Delete a portal                                        |
-| `/lobby portal list`                                    | Any    | `lobby.command.portal`       | List the portal count                                  |
+| `/lobby portal list`                                    | Any    | `lobby.command.portal`       | List the count and a bounded truthful ID prefix        |
 | `/lobby portal info <portal>`                           | Any    | `lobby.command.portal`       | Show bounded portal details                            |
 | `/lobby portal enable <portal>`                         | Player | `lobby.command.portal`       | Enable a portal                                        |
 | `/lobby portal disable <portal>`                        | Player | `lobby.command.portal`       | Disable a portal                                       |
@@ -179,7 +187,9 @@ Both status routes require `lobby.command.debug`. `status` shows state, native a
 admission, pending/maximum work, spawn state, and object counts; its server count includes all configured
 `servers.yml` entries, whether enabled or disabled. `debug` additionally shows the Runtime generation
 and resolved persistent directory; do not grant this permission to ordinary users because that path is
-operationally sensitive.
+operationally sensitive. An uninitialized bridge still reports its safe generation/admission/queue
+diagnostics; unavailable configuration counts are rendered as `n/a`, and only `debug` includes the
+directory.
 
 ## Permissions
 
@@ -214,6 +224,35 @@ TypeScript owns plugin lifecycle, command declarations and handlers, safe comman
 configurable command-message catalog, reload serialization, and bounded data-only bridge requests.
 It does not receive Bukkit objects or general filesystem/native access.
 
+The native Runtime listeners currently provide these concrete behaviors:
+
+- Main-hand right-click-air and right-click-block execute configured managed-item actions; left-click
+  remains inert except for portal-wand selection.
+- Menus are player-, generation-, inventory-, and token-bound. Click/drag protection remains after a
+  live session is invalidated, including for bypass players.
+- Join and managed respawn apply the configured spawn semantics, managed hotbar, sidebar, and visibility
+  refresh; join setup runs only after a configured asynchronous teleport succeeds.
+- Movement portals select in memory, defer the action to the entity scheduler, and revalidate bridge
+  ownership, online/managed state, portal/action identity, permission, occupancy, containment, and
+  highest priority before execution.
+- Sidebar updates reclaim the managed scoreboard if another plugin replaces it, then restore the
+  scoreboard observed immediately before the latest reclaim when ownership ends.
+- Join, quit, managed-world entry/exit, respawn, reload, and handoff refresh visibility so both the
+  changing player and remaining viewers converge on the configured mode.
+
+With protection enabled, synchronous native cancellation covers player damage, food/exhaustion and
+hostile targeting; inventory click/drag/move/pickup, drop/pickup/swap/consume/item damage; item and
+bucket interactions; armor stands, entities, hangings, leash and shear; block break/place/dispense,
+farmland interaction, fertilization and cauldrons; TNT priming, fire/burn/fade/form/grow/spread, moisture,
+leaves, sponge absorption, fluids and pistons; block/entity explosions and entity block changes;
+projectiles, portals, vehicles, structures, weather and thunder. Player-caused checks honor bypass;
+environmental checks and managed artifacts remain protected as documented.
+
+These listeners are Runtime-owned by design. Generic ShamooTS event DTOs cannot safely preserve the
+synchronous cancellation and direct player/inventory/world mutation required by Paper events, and an
+asynchronous JavaScript round trip would introduce races. TypeScript therefore requests bounded native
+actions but does not own gameplay listeners.
+
 A successful TypeScript enable means the configuration candidate and command catalog were accepted.
 It does not itself prove native activation: the coordinated Runtime keeps the candidate in standby and
 activates it only after invocation admission opens. `ready` plus `active=true` in admin status is the
@@ -247,6 +286,15 @@ fabricate them.
 - Player visibility state, cooldowns, portal selections, and visualization toggles are in memory.
 - Configuration applies only to explicitly managed worlds.
 - Runtime artifact replacement and YAML reload are separate lifecycle transactions.
+- Script-generation replacement may remain hot, but live disable, reload, or replacement of the
+  ShamooRuntime Java plugin is unsupported; stop the full server before replacing Runtime.
+
+Only the first managed-bridge activation during one Java Runtime lifetime may apply `join.reset` to
+players who were already online. Later YAML reloads and hot script-generation handoffs reconcile the
+managed hotbar, sidebar, visibility, world policy, and generation artifacts without clearing ordinary
+inventory, potion effects, experience, flight, or staff state. A truly cold reset for already-online
+players requires stopping the server; reconnecting players then receive normal destructive join-reset
+semantics and must be treated accordingly.
 
 ## Development
 
@@ -256,10 +304,11 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-`pnpm check` runs Prettier verification, ESLint, TypeScript checking, Vitest, and `shamooc`. A successful
-build produces exactly the three files in `dist/` shown above. It proves the ShaLobby source gate, not
-publication or process compatibility of the coordinated Runtime. Tests also hash two consecutive
-builds and require identical output.
+`pnpm check` runs Prettier verification, ESLint, TypeScript checking, Vitest, and public `rc.1`
+`shamooc`. A successful build produces exactly the three files in `dist/` shown above and proves the
+ShaLobby source gate, not release-correct inferred route parsers or process compatibility. The final
+artifact must be rebuilt with the current coordinated compiler and its `shamoo-plugin.json` route
+parsers inspected. Tests also hash two consecutive public-compiler builds and require identical output.
 
 ## Documentation
 

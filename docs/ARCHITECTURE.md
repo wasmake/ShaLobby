@@ -4,9 +4,10 @@
 
 ShaLobby is implemented as a TypeScript lifecycle and command layer over a purpose-built native
 ShamooRuntime capability. The source quality and compiler gates pass. The coordinated Runtime bridge
-and matching upstream `@shamoo/paper` API are not published in `0.1.0-rc.1`, so the plugin currently
-uses its own bounded direct-host adapter while retaining published dependencies for reproducible
-builds.
+and matching upstream `@shamoo/paper` API and compiler parser inference are not published in
+`0.1.0-rc.1`, so the plugin currently uses its own bounded direct-host adapter while retaining published
+dependencies for reproducible source checks. Release artifacts require the current coordinated
+compiler.
 
 The architectural boundary is:
 
@@ -62,18 +63,19 @@ Runtime stages and replaces it transactionally.
 The persistent root contains exactly the known YAML basenames. Runtime creates missing defaults,
 confines reads/writes, rejects symbolic links and traversal, and never deletes data during plugin
 generation cleanup. `managed-lobby.data-directory` can move the data root, but Runtime always appends
-the authorized owner and rejects placement under `plugins.directory`.
+the authorized owner. The final owner directory and `plugins.directory` may not overlap in either
+direction.
 
 ## TypeScript Components
 
-| Module                 | Responsibility                                                                                 |
-| ---------------------- | ---------------------------------------------------------------------------------------------- |
-| `src/paper.ts`         | Paper entrypoint export surface                                                                |
-| `src/application.ts`   | Enable lifecycle, startup order, serialized reload transactions, message commit                |
-| `src/commands.ts`      | Exact command routes, senders, permissions, argument shaping, safe replies                     |
-| `src/messages.ts`      | Bounded configurable command-message map, compiled fallbacks, safe substitutions               |
-| `src/managed-lobby.ts` | Internal direct-host request/response types, exact validation, deep copy/freeze, client errors |
-| `src/logging.ts`       | Bounded structured lifecycle and command logging                                               |
+| Module                 | Responsibility                                                                                |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| `src/paper.ts`         | Paper entrypoint export surface                                                               |
+| `src/application.ts`   | Enable lifecycle, startup order, serialized reload transactions, message commit               |
+| `src/commands.ts`      | Exact command routes, senders, permissions, argument shaping, safe replies                    |
+| `src/messages.ts`      | Bounded configurable command-message map, compiled fallbacks, safe substitutions              |
+| `src/managed-lobby.ts` | Internal direct-host request/response types, one host copy boundary, exact validation, errors |
+| `src/logging.ts`       | Bounded structured lifecycle and command logging                                              |
 
 `ShaLobbyApplication.start()` performs `ensure`, asks Runtime to reload, validates the correlated
 `messagesContent` from that accepted snapshot, commits the command catalog, then marks the configuration
@@ -100,7 +102,7 @@ Before a call, the adapter:
   oversized collections, excessive node counts, and oversized text; and
 - requires the native host function to return a Promise.
 
-It applies the same copied-data checks to results, requires `ok` and bounded `state`, and requires a
+It applies one copied-data boundary to host results, requires `ok` and bounded `state`, and requires a
 bounded `error` only on failures. Runtime failures become typed host errors; raw details are logged but
 not copied into player replies. Because failures currently contain no separately safe message,
 TypeScript does not infer missing-spawn, portal-selection, or editor-permission causes from that raw
@@ -191,8 +193,11 @@ or mutation remain unsupported and operators must not edit concurrently.
 
 ## Native Event Flow
 
-Runtime listeners cancel protection-sensitive events synchronously; they never wait for JavaScript.
-Asynchronous host requests and portal effects use bounded queues and the Paper global/entity owners.
+Runtime listeners cancel protection-sensitive events synchronously and directly mutate
+player/inventory/world state; they never wait for JavaScript. Generic ShamooTS event DTOs cannot safely
+provide those synchronous cancellation and mutation guarantees, so gameplay listeners intentionally
+remain native. Asynchronous host requests and portal effects use bounded queues and the Paper
+global/entity owners.
 
 Portal entry demonstrates the native path:
 
@@ -202,11 +207,13 @@ PlayerMoveEvent
   -> immutable chunk index selects highest priority portal
   -> permission and cooldown check
   -> bounded action queued to player scheduler
+  -> ownership, player, portal, action, permission, occupancy, containment, priority revalidated
   -> spawn/menu/title/sound/particle/visibility or Bungee request
 ```
 
 Overlapping portals are intentional. Highest priority wins; ID ascending breaks a tie. Cooldown starts
-when entry is accepted for queuing, not when a later proxy connection is confirmed.
+only after deferred revalidation accepts the native action, not when movement first queues it or when a
+later proxy connection is confirmed.
 
 ## Spawn Invariant
 
@@ -221,7 +228,10 @@ has no target. Runtime never substitutes the first managed world.
 ## Protection Model
 
 Protection is deliberately one `enabled` flag plus one `bypass-permission`. It is not a map of
-independent feature switches. Runtime applies it only in managed worlds.
+independent feature switches. Runtime applies it only in managed worlds and synchronously covers damage,
+food/exhaustion, targeting, inventories and item movement/use, blocks and environmental growth/flow,
+entities and hangings, buckets, armor stands, leash/shear, projectiles, explosions/TNT, portals,
+vehicles, structures, fire, weather, and thunder.
 
 Player-caused restrictions check bypass. Environmental mutation remains cancelled while protection is
 enabled. Managed generation artifacts are always protected, including from bypassing administrators,
@@ -235,8 +245,9 @@ PlaceholderAPI or any external provider. There is no native rank, coins, proxy s
 network-wide population value.
 
 Sidebars are private per-player scoreboards. Duplicate rendered lines receive stable unique entries;
-only changed title or line components are updated. Runtime restores the scoreboard it replaced when a
-player leaves scope or the generation closes.
+only changed title or line components are updated. If another plugin replaces the active scoreboard,
+the next update reclaims the managed sidebar and records that replacement for restoration. Runtime
+restores the latest scoreboard it replaced when a player leaves scope or the generation closes.
 
 ## Transfers
 
@@ -259,6 +270,12 @@ reactivate. Persistent YAML remains outside this lifecycle.
 Accordingly, a successful TypeScript enable log records configuration acceptance while native status
 may still be `standby`. Operational readiness requires post-admission `ready`, `active=true`, and open
 invocation admission.
+
+Only the first managed bridge activated during one Java Runtime lifetime may apply `join.reset` to
+players who are already online. Hot script-generation replacement and YAML reload reconcile managed
+artifacts and presentation without clearing unrelated player state. Replacing, disabling, or reloading
+the ShamooRuntime Java plugin live is unsupported; operators must use a full server stop for deterministic
+native cleanup.
 
 ## Intentional Boundary
 

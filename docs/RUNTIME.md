@@ -11,10 +11,12 @@ The plugin therefore uses a bounded internal direct-host adapter for reproducibl
 currently published package set. Deployment still requires a coordinated Paper Runtime JAR built from
 the bridge source. Do not infer compatibility from matching `rc.1` labels.
 
-The coordinated Runtime source now embeds byte-identical copies of ShaLobby's eight defaults, returns
-correlated `messagesContent`, and enforces the same omission-only request fields. Defaults parity is a
-passing release gate, not the remaining blocker. Publication of matching Runtime/API artifacts and
-supported-host verification are still required; a green ShaLobby-only build is not sufficient.
+Coordinated Runtime and ShaLobby source have correlated `messagesContent`, the same omission-only request
+fields, and byte-identical defaults. Current ShamooTS also infers command parsers from decorated
+parameter types. Public `rc.1` `shamooc` predates that inference and can emit old string defaults after
+parser omission, so a release artifact must be built with the current coordinated compiler and have its
+route parsers inspected. Source parity is complete; coordinated publication and supported-host process
+verification remain pending.
 
 ## Supported Host
 
@@ -29,6 +31,8 @@ supported-host verification are still required; a green ShaLobby-only build is n
 
 The pinned Javet Node distribution creates the Linux x86-64 restriction. No support claim is made for
 Windows, macOS, ARM64, another Paper version, Velocity-only hosting, or the published `rc.1` Runtime.
+The managed-lobby feature supports standard Paper 1.21.8 only. Generic ShamooRuntime Folia support is a
+separate capability and does not make this feature Folia-compatible.
 
 ## Runtime Configuration
 
@@ -53,8 +57,8 @@ The owner comparison uses the manifest plugin ID, not folder name, command permi
 or display name. A disabled feature or owner mismatch means the plugin receives no
 `paperManagedLobby` host function.
 
-The resolved data root must not be beneath `plugins.directory`. Runtime appends the owner after
-resolving the configured root.
+Runtime appends the owner after resolving the configured root. That final owner directory and
+`plugins.directory` must not overlap in either direction.
 
 ## Directory Layout
 
@@ -105,12 +109,22 @@ YAML in the watched plugin candidate.
 7. Stand in configured managed world `world` and run `/lobby setspawn`.
 8. Review generated server targets and disabled portal examples, then optionally run `/lobby reload`.
 
+Only this first managed-bridge activation during the Java Runtime lifetime may apply `join.reset` to
+players who were already online when activation occurs. Stop the full server before first enabling the
+feature on a populated process and treat that cold activation as destructive. Later script-generation
+handoffs and YAML reloads restore managed artifacts/presentation without clearing ordinary inventory,
+effects, experience, flight, or staff state.
+
 On a healthy post-admission startup, `/lobby status` reports `ready`, `active=true`, invocation
 admission, pending/maximum work, `spawnConfigured`, and item/menu/server/portal counts. `/lobby debug`
 adds the Runtime generation and persistent directory, whose returned final form is capped at 512
 characters. The server count includes every configured entry, whether enabled or disabled. Both routes
 are protected by `lobby.command.debug`, and only debug exposes the sensitive path. These commands report
 local bridge state, not proxy or destination health.
+
+Before configuration is initialized, both routes still return bounded generation, admission, and queue
+diagnostics. Configuration-derived counts display as `n/a`; the persistent directory remains exclusive
+to `/lobby debug`.
 
 ## First-Start Storage
 
@@ -152,9 +166,11 @@ recursively rejects cycles, accessors, undefined values, non-finite numbers, non
 oversized graphs, unknown keys, malformed IDs, malformed permissions, and noncanonical player UUIDs
 before invoking Runtime.
 
-After the broad copied-data boundary, ShaLobby validates the successful response for the exact emitted
-operation/action: expected state, required fields, types, ranges, counts, portal shapes and action
-semantics. Malformed successes fail closed instead of producing placeholder `?` or `0` output.
+The default transport establishes one broad copied-data and result-envelope boundary. Injected test
+transports are typed to supply the same bounded envelope. ShaLobby then validates every successful
+response for the exact emitted operation/action: expected state, required fields, types, ranges, counts,
+portal shapes and action semantics. Malformed successes fail closed instead of producing placeholder
+`?` or `0` output.
 
 General Runtime execute actions are `setspawn`, `spawn`, `items`, `menu`, and `visibility`. Portal
 administration actions are `portal-wand`, `portal-pos1`, `portal-pos2`, `portal-create`,
@@ -231,6 +247,8 @@ There is no temporary world fallback.
 `/lobby setspawn` works only for an online player in a managed world. A configured spawn contains one
 loaded managed world and exact coordinates, yaw, and pitch. Join teleport occurs only when
 `join.teleport` is true; respawn replaces the event location without an additional delayed teleport.
+After successful join teleport and one tick later after respawn, Runtime reapplies configured reset,
+managed hotbar, sidebar, and visibility state while the player is still in managed scope.
 
 ## Native Scope And Protection
 
@@ -246,12 +264,18 @@ protection:
   bypass-permission: lobby.protection.bypass
 ```
 
-It covers player damage and attacks, hunger/exhaustion, hostile targeting, block mutation, farmland
-interaction, inventory/drop/pickup/swap/consume/damage, buckets, armor stands, entities and hangings,
-vehicles, projectiles, explosions, portal creation/use, structure growth, fluids, pistons, fire,
-weather, and related environmental changes. Player-caused checks honor bypass; environmental checks
-remain protected. Managed generation-tagged items, menus, and portal wands are independently
-immovable.
+It covers player damage and attacks, hunger/exhaustion, hostile targeting; inventory
+click/drag/move/pickup, drop/pickup/swap/consume/item damage; item/block interaction, buckets, armor
+stands, entities/hangings, leash/shear; block break/place/dispense, farmland, fertilization, cauldrons,
+TNT priming, burn/fade/form/grow/spread, moisture, leaves, sponge absorption, fluids and pistons;
+explosions, entity block changes/placement, projectiles, portal creation/use, vehicle
+enter/damage/destruction/collision, structure growth, weather and thunder. Player-caused checks honor
+bypass; environmental checks remain protected. Managed generation-tagged items, menus, and portal
+wands are independently immovable.
+
+Managed hotbar actions execute only for main-hand right-click-air or right-click-block. Left clicks are
+inert except for portal-wand selection. Menus require the current player/generation/inventory/token
+session to execute actions, while managed menu click/drag protection survives invalidation and bypass.
 
 There are no per-event protection fields. Adding such keys is a validation error.
 
@@ -261,9 +285,14 @@ Enabled portals are indexed by world and chunk. Bounds are inclusive. Overlap is
 `priority` wins, then lexicographically smaller ID. Movement performs only in-memory scope, region,
 permission, transition, and cooldown checks; the action is queued to the player's scheduler.
 
-Entry is transition-based. Remaining inside does not repeat the action. The per-player, per-portal
-cooldown is recorded before the native action is queued. Portal editor selections and visualization
-state are generation-owned and in memory.
+Entry is transition-based. Remaining inside does not repeat the action. Portal editor selections and
+visualization state are generation-owned and in memory.
+
+The deferred entity-scheduler callback revalidates bridge ownership, player online/managed state, the
+current enabled portal and unchanged action, permission, occupancy, actual containment, and
+highest-priority selection. Rejected or unavailable deferred actions do not start the cooldown.
+The per-player, per-portal cooldown begins only after that deferred validation accepts the native
+action.
 
 Destructive portal calls require a player in a managed world with the configured protection bypass.
 `portal-list` and `portal-info` are read-only. Visualization uses fixed `END_ROD` corner particles,
@@ -306,6 +335,10 @@ Closing a generation rejects new work, settles pending promises, cancels tasks, 
 closes owned menus, removes only that generation's artifacts, and restores presentation. Persistent
 YAML is not deleted.
 
+Script-generation hot replacement is supported while the ShamooRuntime Java plugin remains enabled.
+Live disable, reload, or replacement of that Java plugin is unsupported for managed-lobby. Stop the full
+standard Paper server before replacing Runtime so shutdown owns deterministic native cleanup.
+
 ## Build And Runtime Verification
 
 From the coordinated ShamooRuntime checkout:
@@ -322,6 +355,10 @@ corepack enable
 pnpm install --frozen-lockfile
 pnpm check
 ```
+
+`pnpm check` currently invokes public `rc.1` `shamooc`; it is a source gate, not the final inference
+gate. Rebuild ShaLobby with the current local ShamooTS CLI and inspect every generated command argument
+and option parser in `dist/shamoo-plugin.json` before assembling the triplet.
 
 Process verification must run the assembled builds on Linux x86-64, Java 21, and Paper 1.21.8. Test
 first-start generation, unconfigured/configured spawn, join and respawn, protection and bypass,

@@ -11,8 +11,9 @@ location is:
 
 Runtime creates every missing file automatically during ShaLobby's first startup and never replaces an
 existing file during `ensure`. The files in `defaults/` are the release fixture for the embedded Runtime
-defaults; administrators do not manually install them. The coordinated Runtime source currently
-generates byte-identical files, and the optional cross-repository test is a required publication gate.
+defaults; administrators do not manually install them. Coordinated Runtime and ShaLobby source now
+match byte for byte. The optional cross-repository test remains the publication guard for that completed
+source parity.
 
 > **Destructive default warning:** these defaults are intentionally usable for a dedicated lobby, not a
 > shared gameplay server. Before setting `managed-lobby.enabled: true`, back up the server, worlds, and
@@ -177,14 +178,18 @@ overloaded
 Missing command keys use the compiled Spanish fallbacks in `src/messages.ts`. `%prefix%` expands from
 the configured `prefix` or its compiled fallback. Command handlers provide only context-specific
 values such as `%player%`, `%menu%`, `%portal%`, `%count%`, `%enabled%`, `%destination%`, `%world%`,
-`%x%`, `%y%`, `%z%`, `%admission%`, `%pending%`, `%maximum%`, `%generation%`, `%directory%`, and other
-bounded status fields. Unknown tokens remain unchanged. Dynamic values escape backslashes and `<`
-before MiniMessage rendering. The generation and directory are used only by `/lobby debug`; both
-diagnostic routes require the administrator permission `lobby.command.debug`.
+`%minimum%`, `%maximum%`, `%permission%`, `%priority%`, `%cooldown%`, `%visualization%`, `%ids%`, `%x%`,
+`%y%`, `%z%`, `%admission%`, `%pending%`, `%generation%`, `%directory%`, and other bounded status fields.
+Unknown tokens remain unchanged. Dynamic values escape backslashes and `<` before MiniMessage rendering.
+The generation and directory are used only by `/lobby debug`; both diagnostic routes require the
+administrator permission `lobby.command.debug`.
 
 The command-message keys remaining after the native Spanish presentation IDs must exactly equal the
 compiled fallback keys and values. The defaults contract test enforces that equality, so obsolete
 command keys cannot silently remain in generated YAML.
+
+Native `item-cooldown` and `portal-cooldown` feedback are intentionally outside the TypeScript command
+fallback catalog. Both receive Runtime's rounded-up `%seconds%` value.
 
 ### `titles`
 
@@ -249,6 +254,8 @@ type is `Void`; arbitrary particle data is intentionally outside the bridge.
 The generated IDs and slots are `selector-juegos: 0`, `selector-lobbies: 1`, `perfil: 4`,
 `visibilidad: 7`, and `ajustes: 8`. Runtime tags managed items with owner-generation PDC data, restores
 them during enforcement, and prevents moving or consuming them independently of general protection.
+Configured actions run only from a main-hand right-click-air or right-click-block; left-click does
+nothing except when the held item is the portal wand.
 
 ## `menus.yml`
 
@@ -273,7 +280,9 @@ Each `slots` entry allows exactly:
 | `action`   | no       | action object, default `{ type: none }`                    |
 
 The generated menu IDs are `game-selector`, `lobby-selector`, `profile`, and `settings`, each with
-three rows. Menus are protected, player- and generation-scoped inventories.
+three rows. Menus are protected player-, generation-, inventory-, and token-scoped sessions. Only the
+current matching session can execute an action, while managed click/drag protection remains after
+session invalidation and still applies to bypass players.
 
 ## Action Schema
 
@@ -382,8 +391,8 @@ The object is never a list and has no ID or per-world variant.
 | `id`          | yes      | unique ID                                                                                     |
 | `enabled`     | no       | boolean, default `true`                                                                       |
 | `world`       | yes      | managed-world name, at most 64 characters                                                     |
-| `min`         | yes      | coordinate object `{ x, y, z }`                                                               |
-| `max`         | yes      | coordinate object `{ x, y, z }`                                                               |
+| `min`         | yes      | integer block-bound object `{ x, y, z }`                                                      |
+| `max`         | yes      | integer block-bound object `{ x, y, z }`                                                      |
 | `permission`  | no       | permission node or null                                                                       |
 | `priority`    | no       | integer `-10000..10000`, default `0`                                                          |
 | `cooldown-ms` | no       | integer `0..600000`, default `config.yml.portal-cooldown-ms`                                  |
@@ -391,9 +400,10 @@ The object is never a list and has no ID or per-world variant.
 | `action`      | no       | any native action; inferred as matching `connect` when `destination` exists, otherwise `none` |
 | `visualize`   | no       | boolean, default `false`                                                                      |
 
-Coordinate members use the same finite `x/z` range as spawn and `y` range `-2048..2048`. Every
-minimum component must be less than or equal to its maximum. Native preflight also requires Y bounds
-inside the loaded world's height.
+Portal bound members are integer block coordinates: `x/z` use `-30000000..30000000` and `y` uses
+`-2048..2048`. Unlike spawn location coordinates, fractional values are rejected. Every minimum
+component must be less than or equal to its maximum. Native preflight also requires Y bounds inside the
+loaded world's height.
 
 Bounds are inclusive. Overlap is supported rather than rejected: the highest `priority` wins and an
 ID ascending comparison breaks ties. Disabled portals are omitted from lookup. Each enabled portal
@@ -405,8 +415,13 @@ portals are `portal-survival`, `portal-skyblock`, and `portal-minigames`; all ar
 priority `10`, cooldown `2500`, and matching example permissions and server actions.
 
 Portal entry uses transition behavior. Crossing from outside to inside selects one portal, checks its
-permission and per-player cooldown, records the cooldown, and queues the action. Remaining inside does
-not repeat it; leave and re-enter to trigger another transition.
+permission and current per-player cooldown, and queues the action. Remaining inside does not repeat it;
+leave and re-enter to trigger another transition.
+
+Execution is deferred to the entity scheduler and revalidates native bridge ownership, player
+online/managed state, current enabled portal and action, permission, occupancy, containment, and
+highest-priority selection. A rejected deferred action does not consume cooldown.
+The cooldown begins only after this deferred validation accepts the native action.
 
 ## Persistence And Reload
 

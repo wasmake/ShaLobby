@@ -6,10 +6,11 @@ ShaLobby implements its TypeScript lifecycle, complete command surface, configur
 catalog, bounded internal direct-host adapter, polished defaults contract, tests, and three-file Paper
 build. `pnpm check` includes the build and passes for the current source.
 
-The managed-lobby Runtime bridge and matching upstream `@shamoo/paper` API are implemented in
-coordinated source work but are not published in the `0.1.0-rc.1` artifacts. Keep this distinction in
-code, tests, release notes, and process verification. A successful ShaLobby compile does not add the
-bridge to a public `rc.1` Runtime.
+The managed-lobby Runtime bridge, matching upstream `@shamoo/paper` API, and compiler command-parser
+inference are implemented in coordinated source work but are not published in the `0.1.0-rc.1`
+artifacts. Keep this distinction in code, tests, release notes, and process verification. A successful
+public-compiler ShaLobby build does not add the bridge to a public Runtime and does not prove inferred
+route parsers.
 
 ## Toolchain
 
@@ -86,7 +87,7 @@ pnpm run doctor
 pnpm build
 ```
 
-`pnpm build` invokes `shamooc`. A successful build leaves exactly:
+`pnpm build` invokes the pinned public `rc.1` `shamooc`. A successful build leaves exactly:
 
 ```text
 dist/index.js
@@ -98,6 +99,13 @@ The manifest identity is `shalobby`, platform is Paper, and compatibility pins M
 `1.21.8`. General filesystem read/write, network, workers, child processes, native addons, and Node
 builtins remain denied in `shamoo.config.json`; the owner-gated direct host capability is narrower.
 
+ShaLobby command bindings intentionally omit every explicit parser and let current ShamooTS infer
+`string`, `number`, `boolean`, or `player` from the parameter type. Public `rc.1` predates this compiler
+feature and can emit old string descriptor defaults while still completing `pnpm check`. For the
+coordinated gate, build the current CLI in the ShamooTS checkout, run its `packages/cli/dist/shamooc.js`
+entry against ShaLobby, then inspect `dist/shamoo-plugin.json`. Do not update ShaLobby dependency
+versions until the coordinated release is published.
+
 ## Source Testing
 
 The current Vitest suite checks:
@@ -108,13 +116,16 @@ The current Vitest suite checks:
 - serialized concurrent TypeScript reload requests;
 - configurable fallback messages and escaped dynamic MiniMessage values;
 - exact command-to-Runtime request shapes for spawn, items, menus, and portal administration;
+- source-level absence of explicit parsers/stale suggestions and concise inferred optional declarations;
 - omission-only portal-create options and spawn destinations;
 - operation/action-specific success validation before command output;
 - pre-transport command ID, permission, and range validation without false success logging;
 - all three independently registered equivalent self-spawn routes and player-target handling;
 - bounded admin status/debug fields and safe Spanish host-failure feedback;
+- enriched bounded portal lists/info and uninitialized status/debug diagnostics;
 - hostile request graph rejection before host invocation;
 - Promise/result envelope validation and copied frozen data;
+- one production copied-result boundary with no second deep copy for a contract-valid injected transport;
 - all eight defaults, exact fallback parity, the 15-line scoreboard and placeholder set, IDs, slots,
   current actions, references, portals, and optional spawn shape; and
 - identical SHA-256 hashes for two consecutive three-file builds.

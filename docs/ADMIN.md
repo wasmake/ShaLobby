@@ -6,11 +6,10 @@ El código de ShaLobby está implementado y supera sus comprobaciones y compilac
 bridge coordinado de ShamooRuntime y la API correspondiente de `@shamoo/paper` todavía no están
 publicados en `0.1.0-rc.1`. El Runtime público `rc.1` no sirve para este despliegue. Use un JAR de
 Runtime coordinado que incluya `managed-lobby` y conserve la identidad exacta de sus fuentes.
-El Runtime coordinado ya incorpora exactamente los mismos ocho defaults y supera la paridad byte a byte.
-La publicación sigue bloqueada por la falta de artefactos Runtime/API coordinados y su certificación
-conjunta; no basta con compilar ShaLobby de forma aislada. Ese contrato incluye `messagesContent`
-correlacionado en cada recarga correcta y campos opcionales que se omiten en vez de enviarse como
-`null`.
+La paridad de fuentes, incluidos los ocho defaults, ya está completa. La publicación de los artefactos
+Runtime/API/compiler coordinados y la certificación conjunta en proceso siguen pendientes; no basta con
+compilar ShaLobby de forma aislada. El contrato incluye `messagesContent` correlacionado en cada recarga
+correcta y campos opcionales que se omiten en vez de enviarse como `null`.
 
 ## Requisitos
 
@@ -19,6 +18,9 @@ correlacionado en cada recarga correcta y campos opcionales que se omiten en vez
 - Paper 1.21.8.
 - ShamooRuntime Paper coordinado con ShaLobby.
 - Un proxy compatible con mensajes BungeeCord si se usarán transferencias.
+
+Esta capacidad de lobby solo admite Paper estándar 1.21.8. El soporte Folia genérico de ShamooRuntime
+no amplía la compatibilidad de `managed-lobby`.
 
 ## Inicio rápido
 
@@ -29,7 +31,9 @@ correlacionado en cada recarga correcta y campos opcionales que se omiten en vez
 > rápida y las reglas del mundo, y activa una protección amplia. En un servidor survival o de juego
 > normal puede eliminar inventario/estado e impedir la jugabilidad prevista.
 
-1. Detenga Paper e instale el JAR coordinado de ShamooRuntime en `<paper>/plugins/`.
+1. Detenga por completo Paper e instale el JAR coordinado de ShamooRuntime en `<paper>/plugins/`. No
+   desactive, recargue ni sustituya en caliente el plugin Java de Runtime; su limpieza nativa
+   determinista exige una parada completa.
 2. Inicie y detenga Paper una vez si todavía no existe
    `<paper>/plugins/ShamooRuntime/config.yml`.
 3. Active la capacidad y su único propietario en ese archivo:
@@ -57,6 +61,9 @@ correlacionado en cada recarga correcta y campos opcionales que se omiten en vez
 
 5. Inicie Paper. En el primer arranque, Runtime genera automáticamente los ocho defaults pulidos en
    `<paper>/plugins/ShamooRuntime/data/shalobby/`. No copie manualmente el directorio `defaults/`.
+   Solo la primera activación del bridge durante la vida de ese Runtime puede aplicar `join.reset` a
+   jugadores que ya estuvieran conectados. Trate esa activación en frío como destructiva y no la haga
+   con jugadores conectados.
 6. Entre con un jugador que tenga `lobby.command.setspawn`, sitúese en el mundo administrado
    predeterminado `world` y ejecute:
 
@@ -75,8 +82,9 @@ correlacionado en cada recarga correcta y campos opcionales que se omiten en vez
 9. Pruebe el lobby con permisos ordinarios y administrativos antes de admitir público.
 
 Si cambia `managed-lobby.data-directory`, la ruta cambia. Un valor relativo parte de
-`plugins/ShamooRuntime`, un valor absoluto usa esa raíz, y Runtime añade siempre `/shalobby`. La ruta
-de datos debe quedar fuera del directorio vigilado `plugins.directory`.
+`plugins/ShamooRuntime`, un valor absoluto usa esa raíz, y Runtime añade siempre `/shalobby`. El
+directorio final del propietario y el directorio vigilado `plugins.directory` no pueden contenerse ni
+solaparse en ninguna dirección.
 
 ## Aparición global
 
@@ -138,6 +146,10 @@ Runtime `shalobby` no es un permiso de jugador.
 Los argumentos opcionales de jugador usan al emisor cuando este es un jugador. La consola debe
 indicar un jugador conectado.
 
+Las rutas `items give` e `items reset` se conservan por compatibilidad operativa solicitada, pero ambas
+ejecutan exactamente la misma restauración nativa: reconstruyen la barra rápida administrada según
+`items.yml`. `give` no añade objetos de forma acumulativa ni conserva una segunda copia.
+
 `/spawn` y `/hub` son comandos de nivel superior registrados por separado que ejecutan la misma
 operación que `/lobby`; no son aliases nativos de `/lobby`. Si otro plugin registra uno de esos nombres,
 revise los avisos de registro al arrancar y `/help <comando>`, elimine o renombre la ruta conflictiva en
@@ -147,7 +159,9 @@ ese plugin, o use `/lobby`. ShaLobby no tiene una lista de aliases capaz de reso
 servidores incluye todas las entradas configuradas, activas o no. `/lobby debug` añade la generación y
 el directorio persistente resuelto. Ambos exigen
 `lobby.command.debug`; no conceda ese permiso a usuarios ordinarios porque `debug` revela una ruta del
-sistema.
+sistema. Incluso en estado `uninitialized` se muestran generación, admisión y cola seguras, con conteos
+de configuración `n/a`: `status` conserva admisión y cola, mientras `debug` añade generación y el único
+campo de directorio.
 
 ## Flujo de portales
 
@@ -215,8 +229,8 @@ sistema.
 
 Los límites son inclusivos. Los portales pueden solaparse: gana el valor `priority` más alto y, en
 empate, el ID alfabéticamente menor. El permiso opcional se comprueba al entrar. El enfriamiento es por
-jugador y portal, y se inicia antes de encolar la acción nativa. Un portal deshabilitado no participa en
-la búsqueda.
+jugador y portal, y solo se inicia cuando la revalidación diferida acepta la acción nativa. Encolarla o
+rechazarla no consume enfriamiento. Un portal deshabilitado no participa en la búsqueda.
 
 Los portales generados cubren solo ejemplos en `world`, están deshabilitados y deben adaptarse a la
 construcción real. Cada portal habilitado puede abarcar como máximo 4096 chunks; el índice completo
@@ -246,6 +260,11 @@ comprobaciones de instantánea/versión; las escrituras externas no cooperativas
 recarga o mutación no están soportadas, así que no edite YAML al mismo tiempo. Si una respuesta de éxito
 omite, excede límites o contiene un `messagesContent` que TypeScript no puede analizar, el catálogo de
 comandos anterior se conserva y la operación falla cerrada sin mostrar el payload bruto.
+
+Una recarga YAML o un reemplazo en caliente de la generación script no repite el borrado completo de
+estado para jugadores conectados: reconcilia objetos administrados, sidebar, visibilidad, reglas y
+artefactos sin limpiar inventario ordinario, efectos, experiencia, vuelo ni estado de staff. Para un
+reinicio realmente frío, detenga y arranque el servidor completo y aplique la advertencia destructiva.
 
 Los comandos que escriben `spawn.yml` o `portals.yml` crean un `.bak`, sincronizan el archivo temporal,
 lo sustituyen mediante un rename atómico y validan la configuración completa antes de aplicarla.
