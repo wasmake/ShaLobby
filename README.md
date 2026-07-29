@@ -20,6 +20,12 @@ pnpm install
 pnpm check
 ```
 
+Until the coordinated ShamooTS release is published, the repository must be next to the local
+`shamoo/ShamooTS` checkout referenced by `package.json`. The build automatically compiles the linked
+ShamooTS dependency closure first, so both `pnpm build` and `npm run build` use current declarations
+and compiler behavior rather than stale package output. A source fingerprint avoids rebuilding the
+framework again when neither its commit nor its local changes have changed.
+
 `pnpm build` emits the three compiled plugin files plus `dist/data/*.yml`. Runtime copies missing
 seed files into stable policy-confined storage on first load and preserves subsequent administrator
 edits.
