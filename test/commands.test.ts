@@ -10,6 +10,7 @@ import {
   LobbySpawnCommands,
 } from '../src/commands.js';
 import { MANAGED_LOBBY_FILES, type ManagedLobbyRequest } from '../src/managed-lobby.js';
+import { shaLobbyRuntime } from '../src/lobby.js';
 
 const SELF = '123e4567-e89b-12d3-a456-426614174000';
 const TARGET = '123e4567-e89b-12d3-a456-426614174001';
@@ -44,7 +45,9 @@ function commandContext(
 }
 
 function installHost(operation: (request: ManagedLobbyRequest) => Promise<unknown>): void {
-  Reflect.set(globalThis, 'host', { paperManagedLobby: operation });
+  vi.spyOn(shaLobbyRuntime, 'request').mockImplementation(
+    operation as typeof shaLobbyRuntime.request,
+  );
 }
 
 function portalData(

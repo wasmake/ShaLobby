@@ -6,7 +6,6 @@ import { shaLobbyApplication } from './application.js';
 import { logError, logInfo } from './logging.js';
 import {
   ManagedLobbyHostError,
-  ManagedLobbyUnavailableError,
   type ManagedLobbyExecuteAction,
   type ManagedLobbyPortal,
   type ManagedLobbyPortalInfoSuccess,
@@ -92,7 +91,6 @@ async function reply(
 function failureMessage(error: unknown): CommandMessageKey {
   if (error instanceof PlayerContextError) return 'player-required';
   if (error instanceof CommandInputError) return 'invalid-arguments';
-  if (error instanceof ManagedLobbyUnavailableError) return 'unavailable';
   if (error instanceof ManagedLobbyHostError) {
     if (error.state === 'unavailable') return 'unavailable';
     if (error.state === 'unknown') return 'unknown';

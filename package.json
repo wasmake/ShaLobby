@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "shamooc",
+    "build": "shamooc && node scripts/copy-defaults.mjs",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "doctor": "shamoo doctor",
     "format": "prettier --write .",
@@ -16,16 +16,17 @@
   },
   "dependencies": {
     "@shamoo/commands": "0.1.0-rc.1",
+    "@shamoo/config": "link:../shamoo/ShamooTS/packages/config",
     "@shamoo/decorators": "0.1.0-rc.1",
     "@shamoo/lifecycle": "0.1.0-rc.1",
     "@shamoo/paper": "0.1.0-rc.1",
-    "@shamoo/paper-raw": "0.1.0-rc.1",
+    "@shamoo/paper-raw": "link:../shamoo/ShamooTS/packages/paper-raw",
     "@shamoo/scheduler": "0.1.0-rc.1",
     "yaml": "2.9.0"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@shamoo/cli": "0.1.0-rc.1",
+    "@shamoo/cli": "link:../shamoo/ShamooTS/packages/cli",
     "@types/node": "22.16.5",
     "eslint": "10.0.1",
     "prettier": "3.6.2",

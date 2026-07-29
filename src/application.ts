@@ -4,6 +4,7 @@ import { Plugin } from '@shamoo/decorators';
 import { logError, logInfo } from './logging.js';
 import { ManagedLobbyClient, type ManagedLobbyReloadSuccess } from './managed-lobby.js';
 import { MessageCatalog } from './messages.js';
+import { shaLobbyRuntime } from './lobby.js';
 
 export interface ApplicationReloadResult {
   readonly runtime: ManagedLobbyReloadSuccess;
@@ -17,7 +18,9 @@ export class ShaLobbyApplication {
   #reloadQueue: Promise<void> = Promise.resolve();
 
   public constructor(
-    managedLobby: ManagedLobbyClient = new ManagedLobbyClient(),
+    managedLobby: ManagedLobbyClient = new ManagedLobbyClient((request) =>
+      shaLobbyRuntime.request(request),
+    ),
     messages: MessageCatalog = new MessageCatalog(),
   ) {
     this.managedLobby = managedLobby;
@@ -65,7 +68,7 @@ export class ShaLobbyPlugin {
       logInfo('startup-configuration-accepted', {
         state: result.runtime.state,
         messagesLoaded: true,
-        nativeActivation: 'awaiting-runtime-admission',
+        paperApi: 'generated-public-bindings',
       });
     } catch (error: unknown) {
       logError('startup-failed', error);
@@ -74,7 +77,8 @@ export class ShaLobbyPlugin {
   }
 
   @OnDisable()
-  public disable(): void {
+  public async disable(): Promise<void> {
+    await shaLobbyRuntime.close();
     logInfo('shutdown-complete');
   }
 }

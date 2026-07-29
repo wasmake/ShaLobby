@@ -10,8 +10,8 @@
   "permissions": {
     "builtins": [],
     "filesystem": {
-      "read": [],
-      "write": []
+      "read": ["data"],
+      "write": ["data"]
     },
     "network": false,
     "workers": false,

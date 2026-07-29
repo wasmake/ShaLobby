@@ -926,55 +926,14 @@ function validateExecuteSuccess(
   }
 }
 
-function managedLobbyHost(): {
-  readonly host: object;
-  readonly operation: (...values: readonly unknown[]) => unknown;
-} {
-  let host: unknown;
-  try {
-    host = Reflect.get(globalThis, 'host');
-  } catch (cause: unknown) {
-    throw new ManagedLobbyUnavailableError('Unable to resolve the Shamoo Runtime host.', { cause });
-  }
-  if (host === null || (typeof host !== 'object' && typeof host !== 'function')) {
-    throw new ManagedLobbyUnavailableError('Shamoo Runtime host is unavailable.');
-  }
-
-  let operation: unknown;
-  try {
-    operation = Reflect.get(host, 'paperManagedLobby');
-  } catch (cause: unknown) {
-    throw new ManagedLobbyUnavailableError('Managed-lobby host operation is unavailable.', {
-      cause,
-    });
-  }
-  if (typeof operation !== 'function') {
-    throw new ManagedLobbyUnavailableError('Managed-lobby host operation is unavailable.');
-  }
-  return { host, operation: operation as (...values: readonly unknown[]) => unknown };
-}
-
-/**
- * Direct adapter for the coordinated Runtime bridge. It can switch back to @shamoo/paper after
- * matching managed-lobby declarations and Runtime support are published together.
- */
-export function paperManagedLobby(request: ManagedLobbyRequest): Promise<ManagedLobbyResult> {
-  const safeRequest = validateRequest(copiedData(request, 'Managed-lobby request'));
-  const { host, operation } = managedLobbyHost();
-  const pending = Reflect.apply(operation, host, [safeRequest]);
-  if (!(pending instanceof Promise)) {
-    throw new ManagedLobbyProtocolError('Managed-lobby host operation must return a Promise.');
-  }
-  return pending.then((value: unknown) =>
-    validateResult(copiedData(value, 'Managed-lobby result')),
-  );
-}
-
 export class ManagedLobbyClient {
-  public constructor(private readonly transport: ManagedLobbyTransport = paperManagedLobby) {}
+  public constructor(private readonly transport: ManagedLobbyTransport) {}
 
   private async request(request: ManagedLobbyRequest): Promise<ManagedLobbySuccess> {
-    const result = await this.transport(request);
+    const safeRequest = validateRequest(copiedData(request, 'Lobby service request'));
+    const result = validateResult(
+      copiedData(await this.transport(safeRequest), 'Lobby service result'),
+    );
     if (!result.ok) throw new ManagedLobbyHostError(result.state, result.error);
     return result;
   }

@@ -46,6 +46,10 @@ const DEFAULT_PORTAL_IDS = Object.freeze([
   'portal-minigames',
 ] as const);
 const DIST_FILES = Object.freeze(['index.js', 'index.js.map', 'shamoo-plugin.json'] as const);
+const BUILD_FILES = Object.freeze([
+  ...DIST_FILES,
+  ...DEFAULT_FILES.map((file) => `data/${file}`),
+] as const);
 const SCOREBOARD_PLACEHOLDERS = Object.freeze([
   '%online%',
   '%ping%',
@@ -231,10 +235,11 @@ async function buildHashes(): Promise<Readonly<Record<string, string>>> {
     cwd: PROJECT,
     env: { ...process.env, NO_COLOR: '1' },
   });
-  expect((await readdir(DIST)).sort()).toEqual([...DIST_FILES].sort());
+  expect((await readdir(DIST)).sort()).toEqual([...DIST_FILES, 'data'].sort());
+  expect((await readdir(resolve(DIST, 'data'))).sort()).toEqual([...DEFAULT_FILES].sort());
   return Object.fromEntries(
     await Promise.all(
-      DIST_FILES.map(async (file) => {
+      BUILD_FILES.map(async (file) => {
         const content = await readFile(resolve(DIST, file));
         return [file, createHash('sha256').update(content).digest('hex')] as const;
       }),
@@ -431,7 +436,7 @@ describe('managed lobby defaults contract', () => {
   });
 
   it(
-    'produces identical hashes for two consecutive three-file builds',
+    'produces identical hashes for two consecutive complete builds',
     { timeout: 60_000 },
     async () => {
       const first = await buildHashes();
