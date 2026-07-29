@@ -1,7 +1,7 @@
 # Runtime
 
-ShaLobby requires the executable generated Paper API introduced with its coordinated ShamooRuntime
-and ShamooTS branches. Public `0.1.0-rc.1` artifacts do not contain this capability.
+ShaLobby requires the executable generated Paper API in coordinated ShamooRuntime and ShamooTS
+`0.1.0-rc.2` builds.
 
 Runtime startup reports the linked public member and event counts. For the pinned model, the catalog
 contains 2,213 public types, 30,307 public members, and 422 events, including Adventure MiniMessage.

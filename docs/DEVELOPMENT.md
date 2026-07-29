@@ -1,11 +1,7 @@
 # Development
 
-The repository currently links `@shamoo/config`, `@shamoo/paper-raw`, and `@shamoo/cli` to the local
-ShamooTS workspace because the executable bridge has not been published.
-The `prebuild` lifecycle compiles the linked CLI, configuration, raw Paper bridge, and their workspace
-dependencies before ShaLobby compilation. This also makes `npm run build` safe after pulling new
-ShamooTS source without manually rebuilding its `dist` directories. Repeated builds reuse those
-outputs until the linked workspace commit or local source state changes.
+The repository installs its coordinated ShamooTS dependencies from the scoped registry configured in
+`.npmrc`. Development and production builds do not require a local ShamooTS workspace.
 
 Run:
 
