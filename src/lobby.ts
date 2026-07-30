@@ -7,6 +7,7 @@ import {
   component,
   constant,
   construct,
+  gameRule,
   onlinePlayers,
   player,
   plugin,
@@ -1375,18 +1376,20 @@ export class ShaLobbyRuntime {
         settings.name,
       );
       if (world === null) continue;
-      await call(world, 'setTime', settings.time);
-      await call(world, 'setStorm', settings.storm);
-      await call(world, 'setThundering', settings.thundering);
-      for (const [name, value] of Object.entries(settings['game-rules'])) {
-        const rule = await paperJava
-          .resolve(JAVA_TYPES['org.bukkit.GameRule'])
-          .$invoke<PaperHandle | null>(
-            'getByName',
-            '(Ljava/lang/String;)Lorg/bukkit/GameRule;',
-            name,
-          );
-        if (rule !== null) await call(world, 'setGameRule', rule, value);
+      try {
+        await call(world, 'setTime', settings.time);
+        await call(world, 'setStorm', settings.storm);
+        await call(world, 'setThundering', settings.thundering);
+        for (const [name, value] of Object.entries(settings['game-rules'])) {
+          const rule = await gameRule(name);
+          try {
+            await call(world, 'setGameRule', rule, value);
+          } finally {
+            await rule.$release();
+          }
+        }
+      } finally {
+        await world.$release();
       }
     }
   }
@@ -1405,18 +1408,14 @@ export class ShaLobbyRuntime {
       if (world === null) continue;
       const gameRules: { name: string; value: boolean | number }[] = [];
       for (const name of Object.keys(settings['game-rules'])) {
-        const rule = await paperJava
-          .resolve(JAVA_TYPES['org.bukkit.GameRule'])
-          .$invoke<PaperHandle | null>(
-            'getByName',
-            '(Ljava/lang/String;)Lorg/bukkit/GameRule;',
-            name,
-          );
-        if (rule === null) continue;
-        const value = await call(world, 'getGameRuleValue', rule);
-        await rule.$release();
-        if (typeof value === 'boolean' || typeof value === 'number')
-          gameRules.push({ name, value });
+        const rule = await gameRule(name);
+        try {
+          const value = await call(world, 'getGameRuleValue', rule);
+          if (typeof value === 'boolean' || typeof value === 'number')
+            gameRules.push({ name, value });
+        } finally {
+          await rule.$release();
+        }
       }
       snapshots.push({
         gameRules,
@@ -1458,15 +1457,10 @@ export class ShaLobbyRuntime {
         }
       for (const { name, value } of snapshot.gameRules) {
         try {
-          const rule = await paperJava
-            .resolve(JAVA_TYPES['org.bukkit.GameRule'])
-            .$invoke<PaperHandle | null>(
-              'getByName',
-              '(Ljava/lang/String;)Lorg/bukkit/GameRule;',
-              name,
-            );
-          if (rule !== null) {
+          const rule = await gameRule(name);
+          try {
             await call(world, 'setGameRule', rule, value);
+          } finally {
             await rule.$release();
           }
         } catch (error: unknown) {
@@ -1520,15 +1514,11 @@ export class ShaLobbyRuntime {
       if (world === null) throw new Error(`El mundo ${settings.name} no está cargado.`);
       await world.$release();
       for (const name of Object.keys(settings['game-rules'])) {
-        const rule = await paperJava
-          .resolve(JAVA_TYPES['org.bukkit.GameRule'])
-          .$invoke<PaperHandle | null>(
-            'getByName',
-            '(Ljava/lang/String;)Lorg/bukkit/GameRule;',
-            name,
-          );
-        if (rule === null) throw new Error(`La regla de juego ${name} no existe.`);
-        await rule.$release();
+        try {
+          await (await gameRule(name)).$release();
+        } catch (cause: unknown) {
+          throw new Error(`La regla de juego ${name} no existe.`, { cause });
+        }
       }
     }
   }

@@ -88,6 +88,11 @@ export function constant<Name extends keyof GeneratedJavaTypeMap>(
   return paperJava.resolve(javaType).$get<Constant<Name>>(name, descriptor);
 }
 
+export function gameRule(name: string): Promise<Ref<'org.bukkit.GameRule'>> {
+  const field = name.replaceAll(/([a-z\d])([A-Z])/gu, '$1_$2').toUpperCase();
+  return constant('org.bukkit.GameRule', field);
+}
+
 export async function player(id: string): Promise<Ref<'org.bukkit.entity.Player'> | null> {
   return staticExact(Bukkit, 'getPlayer', '(Ljava/util/UUID;)Lorg/bukkit/entity/Player;', id);
 }

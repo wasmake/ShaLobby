@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { constant } from '../src/api.js';
+import { constant, gameRule } from '../src/api.js';
 
 const originalHost = Object.getOwnPropertyDescriptor(globalThis, 'host');
 
@@ -54,5 +54,28 @@ describe('generated Paper field access', () => {
     await constant(type, name);
 
     expect(paperJava).toHaveBeenCalledWith({ operation: 'get', type, name, descriptor });
+  });
+
+  it.each([
+    ['announceAdvancements', 'ANNOUNCE_ADVANCEMENTS'],
+    ['doFireTick', 'DO_FIRE_TICK'],
+    ['randomTickSpeed', 'RANDOM_TICK_SPEED'],
+    ['tntExplodes', 'TNT_EXPLODES'],
+  ])('resolves legacy game rule %s through exact field %s', async (name, field) => {
+    const paperJava = vi.fn(() => null);
+    Reflect.set(globalThis, 'host', {
+      paperJava,
+      registerCallback: vi.fn(() => true),
+      unregisterCallback: vi.fn(() => true),
+    });
+
+    await gameRule(name);
+
+    expect(paperJava).toHaveBeenCalledWith({
+      operation: 'get',
+      type: 'org.bukkit.GameRule',
+      name: field,
+      descriptor: 'Lorg/bukkit/GameRule;',
+    });
   });
 });
