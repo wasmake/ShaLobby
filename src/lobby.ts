@@ -282,7 +282,15 @@ export class ShaLobbyRuntime {
 
   public async close(): Promise<void> {
     if (this.#closed) return;
-    const replacementPresent = (await paperJava.describe())['replacementPresent'] === true;
+    const runtime = await paperJava.describe();
+    const replacementPresent = runtime['replacementPresent'] === true;
+    if (runtime['platformEnabled'] === false) {
+      this.#closed = true;
+      this.#revision++;
+      await this.awaitPendingActions();
+      this.clearState();
+      return;
+    }
     if (replacementPresent) {
       this.#reloading = true;
       this.#revision++;
@@ -358,17 +366,6 @@ export class ShaLobbyRuntime {
       await attempt(() => this.releaseSidebar(session));
     for (const session of this.#menuSessions.values())
       await attempt(() => session.inventory.$release().then(() => undefined));
-    this.#sidebarSessions.clear();
-    this.#menuSessions.clear();
-    this.#itemCooldowns.clear();
-    this.#initializedPlayers.clear();
-    this.#portalCooldowns.clear();
-    this.#occupiedPortals.clear();
-    this.#pendingJoins.clear();
-    this.#portalSelections.clear();
-    this.#transferCooldowns.clear();
-    this.#visibility.clear();
-    this.#visualizers.clear();
     if (!replacementPresent)
       await attempt(async () => {
         const messenger = await staticExact<PaperHandle>(
@@ -400,15 +397,33 @@ export class ShaLobbyRuntime {
         await handle.$release();
       });
     }
-    this.#itemKey = undefined;
-    this.#persistentString = undefined;
-    this.#configuration = undefined;
+    this.clearState();
     if (failures.length > 0 && replacementPresent) {
       console.error('[ShaLobby] Stale generation cleanup was incomplete.', failures);
       return;
     }
     if (failures.length > 0)
       throw new AggregateError(failures, 'ShaLobby shutdown was incomplete.');
+  }
+
+  private clearState(): void {
+    this.#tasks = [];
+    this.#deferredTasks.clear();
+    this.#pendingActions.clear();
+    this.#sidebarSessions.clear();
+    this.#menuSessions.clear();
+    this.#itemCooldowns.clear();
+    this.#initializedPlayers.clear();
+    this.#portalCooldowns.clear();
+    this.#occupiedPortals.clear();
+    this.#pendingJoins.clear();
+    this.#portalSelections.clear();
+    this.#transferCooldowns.clear();
+    this.#visibility.clear();
+    this.#visualizers.clear();
+    this.#itemKey = undefined;
+    this.#persistentString = undefined;
+    this.#configuration = undefined;
   }
 
   public async join(event: PaperHandle): Promise<void> {
@@ -1207,15 +1222,21 @@ export class ShaLobbyRuntime {
   ): void {
     const tracked = Promise.resolve()
       .then(action)
-      .catch((error: unknown) => {
-        console.error(`[ShaLobby] ${label} failed.`, error);
-      })
+      .catch((error: unknown) => this.reportDetachedFailure(`${label} failed.`, error))
       .then(complete)
-      .catch((error: unknown) => {
-        console.error(`[ShaLobby] ${label} cleanup failed.`, error);
-      });
+      .catch((error: unknown) => this.reportDetachedFailure(`${label} cleanup failed.`, error));
     this.#pendingActions.add(tracked);
     void tracked.then(() => this.#pendingActions.delete(tracked));
+  }
+
+  private async reportDetachedFailure(message: string, error: unknown): Promise<void> {
+    if (this.#closed) return;
+    try {
+      if ((await paperJava.describe())['platformEnabled'] === false) return;
+    } catch {
+      return;
+    }
+    console.error(`[ShaLobby] ${message}`, error);
   }
 
   private async awaitPendingActions(): Promise<void> {
