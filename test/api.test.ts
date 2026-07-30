@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { constant, gameRule } from '../src/api.js';
+import type { PaperHandle } from '@shamoo/paper-raw';
+
+import { constant, gameRule, registerOutgoingPluginChannel } from '../src/api.js';
 
 const originalHost = Object.getOwnPropertyDescriptor(globalThis, 'host');
 
@@ -77,5 +79,19 @@ describe('generated Paper field access', () => {
       name: field,
       descriptor: 'Lorg/bukkit/GameRule;',
     });
+  });
+
+  it('registers outgoing plugin channels through the exact Messenger descriptor', async () => {
+    const invoke = vi.fn(() => Promise.resolve());
+    const messenger = { $invoke: invoke } as unknown as PaperHandle;
+
+    await registerOutgoingPluginChannel(messenger, 'BungeeCord');
+
+    expect(invoke).toHaveBeenCalledWith(
+      'registerOutgoingPluginChannel',
+      '(Lorg/bukkit/plugin/Plugin;Ljava/lang/String;)V',
+      { $paper: 'plugin' },
+      'BungeeCord',
+    );
   });
 });

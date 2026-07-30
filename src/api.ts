@@ -20,6 +20,19 @@ export type Constant<Name extends keyof GeneratedJavaTypeMap> =
 export const Bukkit = paperJava.resolve(JAVA_TYPES['org.bukkit.Bukkit']);
 export const plugin = paperJava.plugin;
 
+export function registerOutgoingPluginChannel(
+  messenger: PaperHandle,
+  channel: string,
+): Promise<void> {
+  return callExact(
+    messenger,
+    'registerOutgoingPluginChannel',
+    '(Lorg/bukkit/plugin/Plugin;Ljava/lang/String;)V',
+    plugin,
+    channel,
+  );
+}
+
 export function call<R = unknown>(
   target: PaperHandle,
   name: string,

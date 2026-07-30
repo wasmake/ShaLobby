@@ -11,6 +11,7 @@ import {
   onlinePlayers,
   player,
   plugin,
+  registerOutgoingPluginChannel,
   staticExact,
   type Ref,
 } from './api.js';
@@ -1529,7 +1530,7 @@ export class ShaLobbyRuntime {
       'getMessenger',
       '()Lorg/bukkit/plugin/messaging/Messenger;',
     );
-    await call(messenger, 'registerOutgoingPluginChannel', plugin, 'BungeeCord');
+    await registerOutgoingPluginChannel(messenger, 'BungeeCord');
     await messenger.$release();
   }
 
