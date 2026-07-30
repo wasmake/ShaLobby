@@ -100,7 +100,7 @@ export class LobbyEvents {
     return shaLobbyRuntime.quit(event);
   }
 
-  @OnPlayerMoveEvent('HIGHEST')
+  @OnPlayerMoveEvent('MONITOR')
   public move(@Context() event: PaperHandle<PlayerMoveEvent>): Promise<void> {
     return shaLobbyRuntime.move(event);
   }

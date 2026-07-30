@@ -68,6 +68,22 @@ interface SidebarSession {
   lines: string[];
 }
 
+interface MovementMailbox {
+  active: boolean;
+  cancelled: boolean;
+  current: Ref<'org.bukkit.entity.Player'> | undefined;
+  movement: MovementSnapshot;
+  pending: boolean;
+  readonly revision: number;
+  runs: number;
+  readonly source: Ref<'org.bukkit.Location'>;
+  version: number;
+}
+
+interface MovementSnapshot {
+  readonly destination: Ref<'org.bukkit.Location'> | null;
+}
+
 const ITEM_KEY = 'managed_item';
 const WAND_ID = 'portal-wand';
 const DISPLAY_SLOT = 'SIDEBAR';
@@ -142,6 +158,7 @@ export class ShaLobbyRuntime {
   readonly #menuSessions = new Map<string, MenuSession>();
   readonly #occupiedPortals = new Map<string, string>();
   readonly #pendingJoins = new Map<string, Ref<'org.bukkit.entity.Player'>>();
+  readonly #pendingMoves = new Map<string, MovementMailbox>();
   readonly #portalCooldowns = new Map<string, number>();
   readonly #portalSelections = new Map<string, { first?: Position; second?: Position }>();
   readonly #pendingActions = new Set<Promise<void>>();
@@ -207,6 +224,7 @@ export class ShaLobbyRuntime {
     this.#revision++;
     try {
       await this.stopTasks();
+      await this.stopPendingMoves();
       await this.stopDeferredTasks();
       await this.awaitPendingActions();
       this.#configuration = candidate;
@@ -335,6 +353,7 @@ export class ShaLobbyRuntime {
       this.#reloading = true;
       this.#revision++;
       try {
+        await this.stopPendingMoves();
         await this.stopDeferredTasks();
         await this.awaitPendingActions();
         await this.replayPendingJoins();
@@ -352,6 +371,7 @@ export class ShaLobbyRuntime {
       }
     };
     await attempt(() => this.stopTasks());
+    await attempt(() => this.stopPendingMoves());
     await attempt(() => this.stopDeferredTasks());
     await attempt(() => this.awaitPendingActions());
     let online: readonly Ref<'org.bukkit.entity.Player'>[] = [];
@@ -460,6 +480,7 @@ export class ShaLobbyRuntime {
     this.#portalCooldowns.clear();
     this.#occupiedPortals.clear();
     this.#pendingJoins.clear();
+    this.#pendingMoves.clear();
     this.#portalSelections.clear();
     this.#transferCooldowns.clear();
     this.#visibility.clear();
@@ -546,7 +567,11 @@ export class ShaLobbyRuntime {
     if (!(await this.isManagedPlayer(current))) return;
     if (this.configuration.spawn.configured) {
       const location = await this.spawnLocation();
-      await callExact(event, 'setRespawnLocation', '(Lorg/bukkit/Location;)V', location);
+      try {
+        await callExact(event, 'setRespawnLocation', '(Lorg/bukkit/Location;)V', location);
+      } finally {
+        await location.$release();
+      }
     }
     await this.deferPlayer(current, () => this.giveItems(current));
   }
@@ -554,6 +579,7 @@ export class ShaLobbyRuntime {
   public async quit(event: PaperHandle): Promise<void> {
     const current = await call<Ref<'org.bukkit.entity.Player'>>(event, 'getPlayer');
     const sidebarKey = current.$identity;
+    await this.cancelPendingMove(sidebarKey);
     this.#inactiveSidebars.add(sidebarKey);
     const [id, playerEntityId] = await Promise.all([
       playerUniqueId(current),
@@ -636,38 +662,193 @@ export class ShaLobbyRuntime {
   }
 
   public async move(event: PaperHandle): Promise<void> {
+    if (!(await callExact<boolean>(event, 'hasChangedPosition', '()Z'))) return;
     const current = await call<Ref<'org.bukkit.entity.Player'>>(event, 'getPlayer');
-    const id = await playerUniqueId(current);
-    const destination = await call<Ref<'org.bukkit.Location'> | null>(event, 'getTo');
-    const destinationManaged = destination !== null && (await this.isManagedLocation(destination));
-    if (!destinationManaged) {
-      this.#occupiedPortals.delete(id);
-      if (this.#visibility.has(id))
-        await this.deferPlayer(current, () => this.leaveManagedPlayer(current));
+    let source: Ref<'org.bukkit.Location'> | undefined;
+    let destination: Ref<'org.bukkit.Location'> | null;
+    try {
+      source = await call<Ref<'org.bukkit.Location'>>(event, 'getFrom');
+      destination = await call<Ref<'org.bukkit.Location'> | null>(event, 'getTo');
+    } catch (error) {
+      const releases: Promise<unknown>[] = [current.$release()];
+      if (source !== undefined) releases.push(source.$release());
+      await Promise.allSettled(releases);
+      throw error;
+    }
+    await this.enqueueMove(current, source, { destination });
+  }
+
+  private async enqueueMove(
+    current: Ref<'org.bukkit.entity.Player'>,
+    source: Ref<'org.bukkit.Location'>,
+    movement: MovementSnapshot,
+  ): Promise<void> {
+    if (this.#closed || this.#reloading) {
+      await Promise.allSettled([
+        current.$release(),
+        source.$release(),
+        this.releaseMovement(movement),
+      ]);
       return;
     }
-    if (!(await this.isManagedPlayer(current))) {
-      await this.deferPlayer(current, async () => {
-        this.activateSidebar(current, id);
-        this.#visibility.set(id, this.configuration.settings.visibility.default);
-        await this.giveItems(current);
-        await this.updateSidebar(current);
-        for (const viewer of await onlinePlayers()) await this.applyVisibility(viewer);
-      });
+    const key = current.$identity;
+    const existing = this.#pendingMoves.get(key);
+    if (existing !== undefined && !existing.cancelled) {
+      const previousDestination = existing.pending ? existing.movement.destination : null;
+      existing.movement = movement;
+      existing.pending = true;
+      existing.version += 1;
+      const releases: Promise<unknown>[] = [current.$release(), source.$release()];
+      if (previousDestination !== null) releases.push(previousDestination.$release());
+      await Promise.allSettled(releases);
+      return;
+    }
+    const mailbox: MovementMailbox = {
+      active: false,
+      cancelled: false,
+      current,
+      movement,
+      pending: true,
+      revision: this.#revision,
+      runs: 0,
+      source,
+      version: 0,
+    };
+    this.#pendingMoves.set(key, mailbox);
+    await this.schedulePendingMove(key, mailbox);
+  }
+
+  private async schedulePendingMove(key: string, mailbox: MovementMailbox): Promise<void> {
+    if (mailbox.current === undefined || mailbox.cancelled) return;
+    const runs = mailbox.runs;
+    try {
+      const scheduler = await staticExact<PaperHandle>(
+        Bukkit,
+        'getGlobalRegionScheduler',
+        '()Lio/papermc/paper/threadedregions/scheduler/GlobalRegionScheduler;',
+      );
+      try {
+        const task = await callExact<PaperHandle>(
+          scheduler,
+          'run',
+          '(Lorg/bukkit/plugin/Plugin;Ljava/util/function/Consumer;)Lio/papermc/paper/threadedregions/scheduler/ScheduledTask;',
+          plugin,
+          () => {
+            mailbox.runs += 1;
+            runOutsidePaperFrame(() => {
+              this.startDetached('Player movement', () => this.runPendingMove(key, mailbox));
+            });
+          },
+        );
+        await task.$release();
+      } finally {
+        await scheduler.$release();
+      }
+      if (mailbox.runs !== runs || this.#pendingMoves.get(key) !== mailbox) return;
+    } catch (error) {
+      if (this.#pendingMoves.get(key) === mailbox) this.#pendingMoves.delete(key);
+      mailbox.cancelled = true;
+      await this.releasePendingMove(mailbox, !mailbox.active);
+      throw error;
+    }
+  }
+
+  private async runPendingMove(key: string, mailbox: MovementMailbox): Promise<void> {
+    if (mailbox.cancelled || this.#pendingMoves.get(key) !== mailbox) return;
+    const current = mailbox.current;
+    if (current === undefined) return;
+    mailbox.active = true;
+    const movement = mailbox.movement;
+    const version = mailbox.version;
+    mailbox.pending = false;
+    const failures: unknown[] = [];
+    try {
+      if (this.isMovementCurrent(mailbox, version))
+        await this.processMove(current, mailbox.source, movement, mailbox, version);
+    } catch (error: unknown) {
+      failures.push(error);
+    }
+    try {
+      await this.releaseMovement(movement);
+    } catch (error: unknown) {
+      failures.push(error);
+    }
+    mailbox.active = false;
+    try {
+      if (!this.isMailboxActive(mailbox)) {
+        if (this.#pendingMoves.get(key) === mailbox) this.#pendingMoves.delete(key);
+        await this.releasePendingMove(mailbox, true);
+      } else if (this.hasPendingMove(mailbox)) await this.schedulePendingMove(key, mailbox);
+      else {
+        this.#pendingMoves.delete(key);
+        await this.releasePendingMove(mailbox, true);
+      }
+    } catch (error: unknown) {
+      failures.push(error);
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(failures, 'Player movement processing was incomplete.');
+  }
+
+  private isMailboxActive(mailbox: MovementMailbox): boolean {
+    return (
+      !mailbox.cancelled && !this.#closed && !this.#reloading && mailbox.revision === this.#revision
+    );
+  }
+
+  private isMovementCurrent(mailbox: MovementMailbox, version: number): boolean {
+    return this.isMailboxActive(mailbox) && mailbox.version === version;
+  }
+
+  private hasPendingMove(mailbox: MovementMailbox): boolean {
+    return mailbox.pending;
+  }
+
+  private async processMove(
+    current: Ref<'org.bukkit.entity.Player'>,
+    source: Ref<'org.bukkit.Location'>,
+    movement: MovementSnapshot,
+    mailbox: MovementMailbox,
+    version: number,
+  ): Promise<void> {
+    const id = await playerUniqueId(current);
+    if (!this.isMovementCurrent(mailbox, version)) return;
+    const { destination } = movement;
+    const destinationManaged = destination !== null && (await this.isManagedLocation(destination));
+    if (!this.isMovementCurrent(mailbox, version)) return;
+    if (!destinationManaged) {
+      this.#occupiedPortals.delete(id);
+      if (this.#visibility.has(id)) await this.leaveManagedPlayer(current);
+      return;
+    }
+    const sourceManaged = await this.isManagedLocation(source);
+    if (!this.isMovementCurrent(mailbox, version)) return;
+    if (!sourceManaged) {
+      this.activateSidebar(current, id);
+      this.#visibility.set(id, this.configuration.settings.visibility.default);
+      await this.giveItems(current);
+      await this.updateSidebar(current);
+      for (const viewer of await onlinePlayers()) await this.applyVisibility(viewer);
       return;
     }
     const y = await call<number>(destination, 'getY');
     if (y < this.configuration.settings['void-rescue-y'] && this.configuration.spawn.configured) {
-      await this.deferPlayer(current, () => this.teleportToSpawn(current));
+      const spawn = await this.spawnLocation();
+      try {
+        if (this.isMovementCurrent(mailbox, version)) await call(current, 'teleportAsync', spawn);
+      } finally {
+        await spawn.$release();
+      }
       return;
     }
     const portal = await this.portalAt(destination);
+    if (!this.isMovementCurrent(mailbox, version)) return;
     if (portal === undefined) {
       this.#occupiedPortals.delete(id);
       return;
     }
     if (this.#occupiedPortals.get(id) === portal.id) return;
-    this.#occupiedPortals.set(id, portal.id);
     const now = Date.now();
     if ((this.#portalCooldowns.get(`${id}:${portal.id}`) ?? 0) > now) return;
     if (
@@ -675,27 +856,31 @@ export class ShaLobbyRuntime {
       !(await call<boolean>(current, 'hasPermission', portal.permission))
     )
       return;
-    await this.deferPlayer(current, async () => {
-      if (this.#occupiedPortals.get(id) !== portal.id) return;
-      const currentPortal = await this.portalAt(
-        await callExact<Ref<'org.bukkit.Location'>>(
-          current,
-          'getLocation',
-          '()Lorg/bukkit/Location;',
-        ),
-      );
-      if (currentPortal?.id !== portal.id) return;
-      if (
-        currentPortal.permission !== undefined &&
-        !(await call<boolean>(current, 'hasPermission', currentPortal.permission))
-      )
-        return;
-      await this.executeAction(current, currentPortal.action);
-      this.#portalCooldowns.set(
-        `${id}:${currentPortal.id}`,
-        Date.now() + currentPortal['cooldown-ms'],
-      );
-    });
+    if (!this.isMovementCurrent(mailbox, version)) return;
+    const currentLocation = await callExact<Ref<'org.bukkit.Location'>>(
+      current,
+      'getLocation',
+      '()Lorg/bukkit/Location;',
+    );
+    let currentPortal: LobbyPortal | undefined;
+    try {
+      currentPortal = await this.portalAt(currentLocation);
+    } finally {
+      await currentLocation.$release();
+    }
+    if (!this.isMovementCurrent(mailbox, version) || currentPortal?.id !== portal.id) return;
+    if (
+      currentPortal.permission !== undefined &&
+      !(await call<boolean>(current, 'hasPermission', currentPortal.permission))
+    )
+      return;
+    if (!this.isMovementCurrent(mailbox, version)) return;
+    this.#occupiedPortals.set(id, currentPortal.id);
+    await this.executeAction(current, currentPortal.action);
+    this.#portalCooldowns.set(
+      `${id}:${currentPortal.id}`,
+      Date.now() + currentPortal['cooldown-ms'],
+    );
   }
 
   public async interact(event: PaperHandle): Promise<void> {
@@ -1382,14 +1567,18 @@ export class ShaLobbyRuntime {
         );
       });
     };
-    task = await callExact<PaperHandle | null>(
-      scheduler,
-      'run',
-      '(Lorg/bukkit/plugin/Plugin;Ljava/util/function/Consumer;Ljava/lang/Runnable;)Lio/papermc/paper/threadedregions/scheduler/ScheduledTask;',
-      plugin,
-      callback,
-      null,
-    );
+    try {
+      task = await callExact<PaperHandle | null>(
+        scheduler,
+        'run',
+        '(Lorg/bukkit/plugin/Plugin;Ljava/util/function/Consumer;Ljava/lang/Runnable;)Lio/papermc/paper/threadedregions/scheduler/ScheduledTask;',
+        plugin,
+        callback,
+        null,
+      );
+    } finally {
+      await scheduler.$release();
+    }
     if (task !== null) this.#deferredTasks.add(task);
   }
 
@@ -1452,6 +1641,53 @@ export class ShaLobbyRuntime {
     );
   }
 
+  private async cancelPendingMove(key: string): Promise<void> {
+    const mailbox = this.#pendingMoves.get(key);
+    if (mailbox === undefined) return;
+    this.#pendingMoves.delete(key);
+    mailbox.cancelled = true;
+    await this.releasePendingMove(mailbox, !mailbox.active);
+  }
+
+  private async releasePendingMove(
+    mailbox: MovementMailbox,
+    releaseCurrent: boolean,
+  ): Promise<void> {
+    const releases: Promise<unknown>[] = [];
+    if (mailbox.pending) {
+      const movement = mailbox.movement;
+      mailbox.pending = false;
+      releases.push(this.releaseMovement(movement));
+    }
+    if (releaseCurrent && mailbox.current !== undefined) {
+      const current = mailbox.current;
+      mailbox.current = undefined;
+      releases.push(current.$release());
+      releases.push(mailbox.source.$release());
+    }
+    const results = await Promise.allSettled(releases);
+    const failures = rejectionReasons(results);
+    if (failures.length > 0)
+      throw new AggregateError(failures, 'Player movement handles could not be released.');
+  }
+
+  private async releaseMovement(movement: MovementSnapshot): Promise<void> {
+    const releases: Promise<unknown>[] = [];
+    if (movement.destination !== null) releases.push(movement.destination.$release());
+    const results = await Promise.allSettled(releases);
+    const failures = rejectionReasons(results);
+    if (failures.length > 0)
+      throw new AggregateError(failures, 'Player movement locations could not be released.');
+  }
+
+  private async stopPendingMoves(): Promise<void> {
+    const keys = [...this.#pendingMoves.keys()];
+    const results = await Promise.allSettled(keys.map((key) => this.cancelPendingMove(key)));
+    const failures = rejectionReasons(results);
+    if (failures.length > 0)
+      throw new AggregateError(failures, 'Pending player movements could not be stopped.');
+  }
+
   private async setVisibility(
     current: Ref<'org.bukkit.entity.Player'>,
     requested: Visibility | 'cycle',
@@ -1491,7 +1727,12 @@ export class ShaLobbyRuntime {
   private async teleportToSpawn(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
     if (!this.configuration.spawn.configured)
       throw new Error('El punto de aparición no está configurado.');
-    await call(current, 'teleportAsync', await this.spawnLocation());
+    const spawn = await this.spawnLocation();
+    try {
+      await call(current, 'teleportAsync', spawn);
+    } finally {
+      await spawn.$release();
+    }
   }
 
   private async spawnLocation(): Promise<Ref<'org.bukkit.Location'>> {
@@ -1503,16 +1744,20 @@ export class ShaLobbyRuntime {
       spawn.world,
     );
     if (world === null) throw new Error(`El mundo ${String(spawn.world)} no está cargado.`);
-    return construct(
-      'org.bukkit.Location',
-      '(Lorg/bukkit/World;DDDFF)V',
-      world,
-      spawn.x,
-      spawn.y,
-      spawn.z,
-      spawn.yaw ?? 0,
-      spawn.pitch ?? 0,
-    );
+    try {
+      return await construct(
+        'org.bukkit.Location',
+        '(Lorg/bukkit/World;DDDFF)V',
+        world,
+        spawn.x,
+        spawn.y,
+        spawn.z,
+        spawn.yaw ?? 0,
+        spawn.pitch ?? 0,
+      );
+    } finally {
+      await world.$release();
+    }
   }
 
   private async capturePortalPosition(
@@ -1555,7 +1800,12 @@ export class ShaLobbyRuntime {
 
   private async portalAt(location: Ref<'org.bukkit.Location'>): Promise<LobbyPortal | undefined> {
     const world = await call<Ref<'org.bukkit.World'>>(location, 'getWorld');
-    const name = await call<string>(world, 'getName');
+    let name: string;
+    try {
+      name = await call<string>(world, 'getName');
+    } finally {
+      await world.$release();
+    }
     const x = await call<number>(location, 'getX');
     const y = await call<number>(location, 'getY');
     const z = await call<number>(location, 'getZ');
@@ -2216,12 +2466,22 @@ export class ShaLobbyRuntime {
   }
 
   private async isManagedPlayer(current: Ref<'org.bukkit.entity.Player'>): Promise<boolean> {
-    return this.isManagedWorld(await call<PaperHandle>(current, 'getWorld'));
+    const world = await call<PaperHandle>(current, 'getWorld');
+    try {
+      return await this.isManagedWorld(world);
+    } finally {
+      await world.$release();
+    }
   }
 
   private async isManagedLocation(location: Ref<'org.bukkit.Location'>): Promise<boolean> {
     const world = await call<PaperHandle | null>(location, 'getWorld');
-    return world !== null && this.isManagedWorld(world);
+    if (world === null) return false;
+    try {
+      return await this.isManagedWorld(world);
+    } finally {
+      await world.$release();
+    }
   }
 
   private async isManagedWorld(world: PaperHandle): Promise<boolean> {
