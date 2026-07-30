@@ -9,7 +9,7 @@ It uses ShamooRuntime's plugin-neutral generated Paper bridge. There is no `shal
 
 ## Requirements
 
-- Paper 1.21.8
+- Paper 26.2
 - A coordinated ShamooRuntime build containing executable generated Paper bindings
 - Node 22 and pnpm 11 for development
 

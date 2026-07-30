@@ -237,6 +237,12 @@ async function buildHashes(): Promise<Readonly<Record<string, string>>> {
   });
   expect((await readdir(DIST)).sort()).toEqual([...DIST_FILES, 'data'].sort());
   expect((await readdir(resolve(DIST, 'data'))).sort()).toEqual([...DEFAULT_FILES].sort());
+  const manifest: unknown = JSON.parse(await readFile(resolve(DIST, 'shamoo-plugin.json'), 'utf8'));
+  const paper = mapping(
+    mapping(mapping(manifest, 'manifest')['platforms'], 'manifest.platforms')['paper'],
+    'manifest.platforms.paper',
+  );
+  expect(paper).toMatchObject({ enabled: true, minecraft: '26.2', paperApi: '26.2' });
   return Object.fromEntries(
     await Promise.all(
       BUILD_FILES.map(async (file) => {
