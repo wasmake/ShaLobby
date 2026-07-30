@@ -12,13 +12,37 @@ afterEach(() => {
 
 describe('generated Paper field access', () => {
   it.each([
-    ['org.bukkit.Material', 'COMPASS', 'Lorg/bukkit/Material;'],
+    ['org.bukkit.GameMode', 'ADVENTURE'],
+    ['org.bukkit.Material', 'COMPASS'],
+    ['org.bukkit.Particle', 'END_ROD'],
+  ] as const)('resolves %s#%s through its generated valueOf member', async (type, name) => {
+    const paperJava = vi.fn(() => null);
+    Reflect.set(globalThis, 'host', {
+      paperJava,
+      registerCallback: vi.fn(() => true),
+      unregisterCallback: vi.fn(() => true),
+    });
+    const descriptor = `L${type.replaceAll('.', '/')};`;
+
+    await constant(type, name);
+
+    expect(paperJava).toHaveBeenCalledWith({
+      operation: 'invoke',
+      type,
+      name: 'valueOf',
+      descriptor: `(Ljava/lang/String;)${descriptor}`,
+      arguments: [name],
+    });
+  });
+
+  it.each([
+    ['org.bukkit.Sound', 'ENTITY_PLAYER_LEVELUP', 'Lorg/bukkit/Sound;'],
     [
       'org.bukkit.persistence.PersistentDataType',
       'STRING',
       'Lorg/bukkit/persistence/PersistentDataType;',
     ],
-  ] as const)('supplies the exact descriptor for %s#%s', async (type, name, descriptor) => {
+  ] as const)('supplies the exact field descriptor for %s#%s', async (type, name, descriptor) => {
     const paperJava = vi.fn(() => null);
     Reflect.set(globalThis, 'host', {
       paperJava,

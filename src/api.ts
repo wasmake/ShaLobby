@@ -71,9 +71,13 @@ export function constant<Name extends keyof GeneratedJavaTypeMap>(
   name: string,
 ): Promise<Ref<Name>> {
   const javaType = JAVA_TYPES[type];
-  return paperJava
-    .resolve(javaType)
-    .$get<Ref<Name>>(name, `L${javaType.javaName.replaceAll('.', '/')};`);
+  const descriptor = `L${javaType.javaName.replaceAll('.', '/')};`;
+  if (javaType.kind === 'enum') {
+    return paperJava
+      .resolve(javaType)
+      .$invoke<Ref<Name>>('valueOf', `(Ljava/lang/String;)${descriptor}`, name);
+  }
+  return paperJava.resolve(javaType).$get<Ref<Name>>(name, descriptor);
 }
 
 export async function player(id: string): Promise<Ref<'org.bukkit.entity.Player'> | null> {
