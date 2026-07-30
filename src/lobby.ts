@@ -958,9 +958,10 @@ export class ShaLobbyRuntime {
       plugin,
       ITEM_KEY,
     );
-    this.#persistentString ??= await paperJava
-      .resolve(JAVA_TYPES['org.bukkit.persistence.PersistentDataType'])
-      .$get('STRING');
+    this.#persistentString ??= await constant(
+      'org.bukkit.persistence.PersistentDataType',
+      'STRING',
+    );
   }
 
   private async managedItemId(item: PaperHandle): Promise<string | undefined> {

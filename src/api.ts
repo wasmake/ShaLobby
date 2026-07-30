@@ -70,7 +70,10 @@ export function constant<Name extends keyof GeneratedJavaTypeMap>(
   type: Name,
   name: string,
 ): Promise<Ref<Name>> {
-  return paperJava.resolve(JAVA_TYPES[type]).$get<Ref<Name>>(name);
+  const javaType = JAVA_TYPES[type];
+  return paperJava
+    .resolve(javaType)
+    .$get<Ref<Name>>(name, `L${javaType.javaName.replaceAll('.', '/')};`);
 }
 
 export async function player(id: string): Promise<Ref<'org.bukkit.entity.Player'> | null> {
