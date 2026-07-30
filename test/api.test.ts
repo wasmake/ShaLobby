@@ -2,7 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { PaperHandle } from '@shamoo/paper-raw';
 
-import { constant, gameRule, registerOutgoingPluginChannel } from '../src/api.js';
+import {
+  cancelEvent,
+  constant,
+  gameRule,
+  playerUniqueId,
+  registerOutgoingPluginChannel,
+  type Ref,
+} from '../src/api.js';
 
 const originalHost = Object.getOwnPropertyDescriptor(globalThis, 'host');
 
@@ -93,5 +100,64 @@ describe('generated Paper field access', () => {
       { $paper: 'plugin' },
       'BungeeCord',
     );
+  });
+
+  it('reads player UUIDs through the exact Entity member', async () => {
+    const id = '2f9fdbe9-f8f2-4651-a1ae-1dc9fc7c2bd0';
+    const paperJava = vi.fn(() => id);
+    Reflect.set(globalThis, 'host', {
+      paperJava,
+      registerCallback: vi.fn(() => true),
+      unregisterCallback: vi.fn(() => true),
+    });
+    const current = {
+      $paperHandle: 'player',
+      $paperObject: 'player-identity',
+      type: 'org.bukkit.entity.Player',
+    } as unknown as Ref<'org.bukkit.entity.Player'>;
+
+    await expect(playerUniqueId(current)).resolves.toBe(id);
+
+    expect(paperJava).toHaveBeenCalledWith({
+      operation: 'invoke',
+      type: 'org.bukkit.entity.Entity',
+      name: 'getUniqueId',
+      descriptor: '()Ljava/util/UUID;',
+      target: {
+        $paperHandle: 'player',
+        $paperObject: 'player-identity',
+        type: 'org.bukkit.entity.Player',
+      },
+      arguments: [],
+    });
+  });
+
+  it('cancels events through the exact Cancellable member', async () => {
+    const paperJava = vi.fn(() => undefined);
+    Reflect.set(globalThis, 'host', {
+      paperJava,
+      registerCallback: vi.fn(() => true),
+      unregisterCallback: vi.fn(() => true),
+    });
+    const event = {
+      $paperHandle: 'event',
+      $paperObject: 'event-identity',
+      type: 'org.bukkit.event.entity.EntityDamageEvent',
+    } as unknown as PaperHandle;
+
+    await cancelEvent(event);
+
+    expect(paperJava).toHaveBeenCalledWith({
+      operation: 'invoke',
+      type: 'org.bukkit.event.Cancellable',
+      name: 'setCancelled',
+      descriptor: '(Z)V',
+      target: {
+        $paperHandle: 'event',
+        $paperObject: 'event-identity',
+        type: 'org.bukkit.event.entity.EntityDamageEvent',
+      },
+      arguments: [true],
+    });
   });
 });

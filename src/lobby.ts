@@ -2,6 +2,7 @@ import { JAVA_TYPES, paperJava, runOutsidePaperFrame, type PaperHandle } from '@
 
 import {
   Bukkit,
+  cancelEvent,
   call,
   callExact,
   component,
@@ -10,6 +11,7 @@ import {
   gameRule,
   onlinePlayers,
   player,
+  playerUniqueId,
   plugin,
   registerOutgoingPluginChannel,
   staticExact,
@@ -180,7 +182,7 @@ export class ShaLobbyRuntime {
       await this.resetPresentation(onlinePlayersNow);
       this.#initializedPlayers.clear();
       for (const online of onlinePlayersNow) {
-        const id = await call<string>(online, 'getUniqueId').then(String);
+        const id = await playerUniqueId(online);
         if (await this.isManagedPlayer(online)) {
           this.#visibility.set(id, this.configuration.settings.visibility.default);
           await this.giveItems(online);
@@ -240,7 +242,7 @@ export class ShaLobbyRuntime {
               await this.updateSidebar(online, onlinePlayersNow.length);
               await this.applyVisibility(online);
             } else {
-              const id = await call<string>(online, 'getUniqueId').then(String);
+              const id = await playerUniqueId(online);
               this.#visibility.delete(id);
               await this.removeManagedItems(online);
               for (const other of onlinePlayersNow)
@@ -287,7 +289,7 @@ export class ShaLobbyRuntime {
     if (runtime['platformEnabled'] === false) {
       this.#closed = true;
       this.#revision++;
-      await this.awaitPendingActions();
+      // Paper can no longer complete scheduler-bound work; runtime teardown abandons it.
       this.clearState();
       return;
     }
@@ -330,7 +332,7 @@ export class ShaLobbyRuntime {
     });
     for (const current of online)
       await attempt(async () => {
-        const id = await call<string>(current, 'getUniqueId').then(String);
+        const id = await playerUniqueId(current);
         const sidebar = this.#sidebarSessions.get(id);
         if (sidebar !== undefined) {
           const assigned = await call<PaperHandle>(current, 'getScoreboard');
@@ -429,7 +431,7 @@ export class ShaLobbyRuntime {
   public async join(event: PaperHandle): Promise<void> {
     const current = await call<Ref<'org.bukkit.entity.Player'>>(event, 'getPlayer');
     if (!(await this.isManagedPlayer(current))) return;
-    const id = await call<string>(current, 'getUniqueId').then(String);
+    const id = await playerUniqueId(current);
     this.#initializedPlayers.add(id);
     this.#pendingJoins.set(id, current);
     if (this.configuration.settings.join['suppress-message'])
@@ -444,7 +446,7 @@ export class ShaLobbyRuntime {
   }
 
   private async initializeJoinedPlayer(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
-    const id = await call<string>(current, 'getUniqueId').then(String);
+    const id = await playerUniqueId(current);
     this.#visibility.set(id, this.configuration.settings.visibility.default);
     if (this.configuration.settings.join.reset) await this.resetPlayer(current);
     else await this.giveItems(current);
@@ -498,18 +500,24 @@ export class ShaLobbyRuntime {
 
   public async quit(event: PaperHandle): Promise<void> {
     const current = await call<Ref<'org.bukkit.entity.Player'>>(event, 'getPlayer');
-    const id = await call<string>(current, 'getUniqueId').then(String);
+    const id = await playerUniqueId(current);
     this.#initializedPlayers.delete(id);
     this.#pendingJoins.delete(id);
-    await this.#menuSessions.get(id)?.inventory.$release();
+    const menu = this.#menuSessions.get(id);
     this.#menuSessions.delete(id);
     this.#visibility.delete(id);
     this.#portalSelections.delete(id);
     this.#occupiedPortals.delete(id);
     this.#visualizers.delete(id);
     const sidebar = this.#sidebarSessions.get(id);
-    if (sidebar !== undefined) await this.releaseSidebar(sidebar);
     this.#sidebarSessions.delete(id);
+    if (menu !== undefined || sidebar !== undefined)
+      runOutsidePaperFrame(() => {
+        this.startDetached('Player quit cleanup', async () => {
+          await menu?.inventory.$release();
+          if (sidebar !== undefined) await this.releaseSidebar(sidebar);
+        });
+      });
   }
 
   public async protect(
@@ -528,7 +536,7 @@ export class ShaLobbyRuntime {
       ))
     )
       return;
-    await call(event, 'setCancelled', true);
+    await cancelEvent(event);
   }
 
   public async protectWeather(
@@ -547,7 +555,7 @@ export class ShaLobbyRuntime {
 
   public async move(event: PaperHandle): Promise<void> {
     const current = await call<Ref<'org.bukkit.entity.Player'>>(event, 'getPlayer');
-    const id = await call<string>(current, 'getUniqueId').then(String);
+    const id = await playerUniqueId(current);
     const destination = await call<Ref<'org.bukkit.Location'> | null>(event, 'getTo');
     const destinationManaged = destination !== null && (await this.isManagedLocation(destination));
     if (!destinationManaged) {
@@ -567,7 +575,7 @@ export class ShaLobbyRuntime {
     }
     const y = await call<number>(destination, 'getY');
     if (y < this.configuration.settings['void-rescue-y'] && this.configuration.spawn.configured) {
-      await this.teleportToSpawn(current);
+      await this.deferPlayer(current, () => this.teleportToSpawn(current));
       return;
     }
     const portal = await this.portalAt(destination);
@@ -612,7 +620,7 @@ export class ShaLobbyRuntime {
     if (item === null) return;
     const id = await this.managedItemId(item);
     if (id === undefined) return;
-    await call(event, 'setCancelled', true);
+    await cancelEvent(event);
     const action = this.enumName(await call(event, 'getAction'));
     if (id === WAND_ID) {
       if (
@@ -636,7 +644,7 @@ export class ShaLobbyRuntime {
     if (!action.includes('RIGHT_CLICK')) return;
     const definition = this.configuration.items.find((candidate) => candidate.id === id);
     if (definition === undefined) return;
-    const playerId = await call<string>(current, 'getUniqueId').then(String);
+    const playerId = await playerUniqueId(current);
     const key = `${playerId}:${id}`;
     const now = Date.now();
     if ((this.#itemCooldowns.get(key) ?? 0) > now) return;
@@ -652,19 +660,19 @@ export class ShaLobbyRuntime {
     const managedItem =
       (currentItem !== null && (await this.managedItemId(currentItem)) !== undefined) ||
       (cursor !== null && (await this.managedItemId(cursor)) !== undefined);
-    const id = await call<string>(current, 'getUniqueId').then(String);
+    const id = await playerUniqueId(current);
     const session = this.#menuSessions.get(id);
     if (session === undefined) {
-      if (managedItem) await call(event, 'setCancelled', true);
+      if (managedItem) await cancelEvent(event);
       return;
     }
     const view = await call<PaperHandle>(event, 'getView');
     const top = await call<PaperHandle>(view, 'getTopInventory');
     if (!paperJava.same(top, session.inventory)) {
-      if (managedItem) await call(event, 'setCancelled', true);
+      if (managedItem) await cancelEvent(event);
       return;
     }
-    await call(event, 'setCancelled', true);
+    await cancelEvent(event);
     const rawSlot = await call<number>(event, 'getRawSlot');
     const definition = session.menu.slots.find((slot) => slot.slot === rawSlot);
     if (definition !== undefined)
@@ -676,15 +684,15 @@ export class ShaLobbyRuntime {
     if (!(await this.isManagedPlayer(current))) return;
     const cursor = await call<PaperHandle | null>(event, 'getOldCursor');
     if (cursor !== null && (await this.managedItemId(cursor)) !== undefined) {
-      await call(event, 'setCancelled', true);
+      await cancelEvent(event);
       return;
     }
-    const id = await call<string>(current, 'getUniqueId').then(String);
+    const id = await playerUniqueId(current);
     const session = this.#menuSessions.get(id);
     if (session === undefined) return;
     const view = await call<PaperHandle>(event, 'getView');
     const top = await call<PaperHandle>(view, 'getTopInventory');
-    if (paperJava.same(top, session.inventory)) await call(event, 'setCancelled', true);
+    if (paperJava.same(top, session.inventory)) await cancelEvent(event);
   }
 
   private status(): ManagedLobbyResult {
@@ -1044,7 +1052,7 @@ export class ShaLobbyRuntime {
   }
 
   private async leaveManagedPlayer(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
-    const id = await call<string>(current, 'getUniqueId').then(String);
+    const id = await playerUniqueId(current);
     await this.removeManagedItems(current);
     const menu = this.#menuSessions.get(id);
     if (menu !== undefined) {
@@ -1103,7 +1111,7 @@ export class ShaLobbyRuntime {
         definition.slot,
         await this.createItem(definition, `menu:${id}`),
       );
-    const playerId = await call<string>(current, 'getUniqueId').then(String);
+    const playerId = await playerUniqueId(current);
     this.#menuSessions.set(playerId, { inventory, menu });
     await call(current, 'openInventory', inventory);
   }
@@ -1170,7 +1178,7 @@ export class ShaLobbyRuntime {
       (candidate) => candidate.id === id && candidate.enabled,
     );
     if (server === undefined) throw new RangeError(`No existe el servidor ${id}.`);
-    const playerId = await call<string>(current, 'getUniqueId').then(String);
+    const playerId = await playerUniqueId(current);
     const now = Date.now();
     if ((this.#transferCooldowns.get(playerId) ?? 0) > now) return;
     this.#transferCooldowns.set(
@@ -1277,7 +1285,7 @@ export class ShaLobbyRuntime {
     current: Ref<'org.bukkit.entity.Player'>,
     requested: Visibility | 'cycle',
   ): Promise<void> {
-    const id = await call<string>(current, 'getUniqueId').then(String);
+    const id = await playerUniqueId(current);
     const previous = this.#visibility.get(id) ?? this.configuration.settings.visibility.default;
     const mode =
       requested === 'cycle'
@@ -1293,7 +1301,7 @@ export class ShaLobbyRuntime {
   }
 
   private async applyVisibility(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
-    const id = await call<string>(current, 'getUniqueId').then(String);
+    const id = await playerUniqueId(current);
     const mode = this.#visibility.get(id) ?? this.configuration.settings.visibility.default;
     for (const other of await onlinePlayers()) {
       if (paperJava.same(current, other)) continue;
@@ -1341,7 +1349,7 @@ export class ShaLobbyRuntime {
     kind: 'portal-pos1' | 'portal-pos2',
     selected?: Ref<'org.bukkit.Location'>,
   ): Promise<ManagedLobbyResult> {
-    const id = await call<string>(current, 'getUniqueId').then(String);
+    const id = await playerUniqueId(current);
     const location = selected ?? (await call<Ref<'org.bukkit.Location'>>(current, 'getLocation'));
     const world = await call<Ref<'org.bukkit.World'>>(location, 'getWorld');
     const position: Position = {
@@ -1619,7 +1627,7 @@ export class ShaLobbyRuntime {
     for (const current of online) {
       if (await this.isManagedPlayer(current)) await this.updateSidebar(current, online.length);
       else {
-        const id = await call<string>(current, 'getUniqueId').then(String);
+        const id = await playerUniqueId(current);
         if (this.#sidebarSessions.has(id)) await this.leaveManagedPlayer(current);
       }
     }
@@ -1630,7 +1638,7 @@ export class ShaLobbyRuntime {
     await this.applyWorldSettings();
     const online = await onlinePlayers();
     for (const current of online) {
-      const id = await call<string>(current, 'getUniqueId').then(String);
+      const id = await playerUniqueId(current);
       if (await this.isManagedPlayer(current)) {
         if (!this.#initializedPlayers.has(id)) {
           await this.initializeJoinedPlayer(current);
@@ -1653,7 +1661,7 @@ export class ShaLobbyRuntime {
     current: Ref<'org.bukkit.entity.Player'>,
     onlineCount?: number,
   ): Promise<void> {
-    const id = await call<string>(current, 'getUniqueId').then(String);
+    const id = await playerUniqueId(current);
     if (!this.configuration.sidebar.enabled) {
       const existing = this.#sidebarSessions.get(id);
       if (existing !== undefined) {
@@ -1761,7 +1769,7 @@ export class ShaLobbyRuntime {
     const failures: unknown[] = [];
     for (const current of online) {
       try {
-        const id = await call<string>(current, 'getUniqueId').then(String);
+        const id = await playerUniqueId(current);
         const sidebar = this.#sidebarSessions.get(id);
         if (sidebar !== undefined) {
           this.#sidebarSessions.delete(id);
@@ -1868,7 +1876,7 @@ export class ShaLobbyRuntime {
   }
 
   private async visualizePortals(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
-    const id = await call<string>(current, 'getUniqueId').then(String);
+    const id = await playerUniqueId(current);
     const world = await call<PaperHandle>(current, 'getWorld');
     const worldName = await call<string>(world, 'getName');
     const portals = this.configuration.portals.filter(

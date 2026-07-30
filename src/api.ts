@@ -50,6 +50,16 @@ export function callExact<R = unknown>(
   return target.$invoke<R>(name, descriptor, ...arguments_);
 }
 
+export async function cancelEvent(event: PaperHandle): Promise<void> {
+  await paperJava.invoke(
+    event,
+    JAVA_TYPES['org.bukkit.event.Cancellable'],
+    'setCancelled',
+    '(Z)V',
+    true,
+  );
+}
+
 export function staticCall<R = unknown>(
   type: {
     $invoke<R>(
@@ -108,6 +118,17 @@ export function gameRule(name: string): Promise<Ref<'org.bukkit.GameRule'>> {
 
 export async function player(id: string): Promise<Ref<'org.bukkit.entity.Player'> | null> {
   return staticExact(Bukkit, 'getPlayer', '(Ljava/util/UUID;)Lorg/bukkit/entity/Player;', id);
+}
+
+export async function playerUniqueId(current: Ref<'org.bukkit.entity.Player'>): Promise<string> {
+  return String(
+    await paperJava.invoke(
+      current,
+      JAVA_TYPES['org.bukkit.entity.Entity'],
+      'getUniqueId',
+      '()Ljava/util/UUID;',
+    ),
+  );
 }
 
 export function onlinePlayers(): Promise<readonly Ref<'org.bukkit.entity.Player'>[]> {
