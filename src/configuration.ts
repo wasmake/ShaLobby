@@ -336,13 +336,15 @@ function validateSettings(value: Record<string, unknown>): void {
 
 function validateSidebar(value: Record<string, unknown>): void {
   keys(value, 'scoreboard.yml.sidebar', ['enabled', 'interval-ticks', 'title-frames', 'lines']);
-  bool(value['enabled'], 'scoreboard.yml.sidebar.enabled');
+  const enabled = bool(value['enabled'], 'scoreboard.yml.sidebar.enabled');
   integer(value['interval-ticks'], 'scoreboard.yml.sidebar.interval-ticks', 1, 1_728_000);
   const titles = array(value['title-frames'], 'scoreboard.yml.sidebar.title-frames');
   if (titles.length === 0 || titles.length > 128)
     throw new TypeError('scoreboard.yml.sidebar.title-frames has an invalid size.');
   titles.forEach((title, index) => text(title, `scoreboard title ${String(index)}`));
   const lines = array(value['lines'], 'scoreboard.yml.sidebar.lines');
+  if (enabled && lines.length === 0)
+    throw new TypeError('scoreboard.yml.sidebar.lines cannot be empty while enabled.');
   if (lines.length > 15)
     throw new TypeError('scoreboard.yml.sidebar.lines cannot exceed 15 lines.');
   lines.forEach((line, index) => {

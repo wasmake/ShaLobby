@@ -80,7 +80,7 @@ import {
   type WeatherChangeEvent,
 } from '@shamoo/paper-raw';
 
-import { call, type Ref } from './api.js';
+import { call, callExact, type Ref } from './api.js';
 import { shaLobbyRuntime } from './lobby.js';
 
 @Component()
@@ -122,7 +122,7 @@ export class LobbyEvents {
 
   @OnEntityDamageEvent('HIGHEST')
   public async damage(@Context() event: PaperHandle<EntityDamageEvent>): Promise<void> {
-    const entity = await call<PaperHandle>(event, 'getEntity');
+    const entity = await callExact<PaperHandle>(event, 'getEntity', '()Lorg/bukkit/entity/Entity;');
     await shaLobbyRuntime.protect(
       event,
       await call<PaperHandle>(entity, 'getWorld'),
@@ -134,7 +134,7 @@ export class LobbyEvents {
 
   @OnFoodLevelChangeEvent('HIGHEST')
   public async food(@Context() event: PaperHandle<FoodLevelChangeEvent>): Promise<void> {
-    const entity = await call<PaperHandle>(event, 'getEntity');
+    const entity = await callExact<PaperHandle>(event, 'getEntity', '()Lorg/bukkit/entity/Entity;');
     await shaLobbyRuntime.protect(
       event,
       await call<PaperHandle>(entity, 'getWorld'),
@@ -176,7 +176,7 @@ export class LobbyEvents {
 
   @OnEntityPickupItemEvent('HIGHEST')
   public async pickup(@Context() event: PaperHandle<EntityPickupItemEvent>): Promise<void> {
-    const entity = await call<PaperHandle>(event, 'getEntity');
+    const entity = await callExact<PaperHandle>(event, 'getEntity', '()Lorg/bukkit/entity/Entity;');
     await shaLobbyRuntime.protect(
       event,
       await call<PaperHandle>(entity, 'getWorld'),
@@ -193,7 +193,11 @@ export class LobbyEvents {
 
   @OnEntityTargetLivingEntityEvent('HIGHEST')
   public async target(@Context() event: PaperHandle): Promise<void> {
-    const target = await call<PaperHandle | null>(event, 'getTarget');
+    const target = await callExact<PaperHandle | null>(
+      event,
+      'getTarget',
+      '()Lorg/bukkit/entity/Entity;',
+    );
     if (target !== null && target.$type === 'org.bukkit.entity.Player')
       await shaLobbyRuntime.protect(
         event,
@@ -368,7 +372,13 @@ export class LobbyEvents {
   }
 
   private async protectEntity(event: PaperHandle): Promise<void> {
-    const entity = await call<PaperHandle>(event, 'getEntity');
+    const entity = await callExact<PaperHandle>(
+      event,
+      'getEntity',
+      event.$type.startsWith('org.bukkit.event.hanging.')
+        ? '()Lorg/bukkit/entity/Hanging;'
+        : '()Lorg/bukkit/entity/Entity;',
+    );
     await shaLobbyRuntime.protect(
       event,
       await call<PaperHandle>(entity, 'getWorld'),

@@ -62,7 +62,10 @@ interface MenuSession {
 interface SidebarSession {
   readonly scoreboard: PaperHandle;
   readonly objective: PaperHandle;
-  readonly teams: readonly PaperHandle[];
+  readonly playerEntityId: number;
+  readonly scores: readonly PaperHandle[];
+  title: string;
+  lines: string[];
 }
 
 const ITEM_KEY = 'managed_item';
@@ -99,6 +102,35 @@ function connectPayload(server: string): Uint8Array {
   return Uint8Array.from([...command, ...target]);
 }
 
+function inventoryCall<R = unknown>(
+  inventory: PaperHandle,
+  name: string,
+  descriptor: string,
+  ...arguments_: readonly unknown[]
+): Promise<R> {
+  return paperJava.invoke<object, R>(
+    inventory,
+    JAVA_TYPES['org.bukkit.inventory.Inventory'],
+    name,
+    descriptor,
+    ...arguments_,
+  );
+}
+
+function rejectionReasons(results: readonly PromiseSettledResult<unknown>[]): unknown[] {
+  const failures: unknown[] = [];
+  for (const result of results)
+    if (result.status === 'rejected') failures.push(result.reason as unknown);
+  return failures;
+}
+
+function isRetiredEntityFailure(error: unknown): boolean {
+  if (String(error) === 'IllegalStateException: Paper entity is retired') return true;
+  if (!(error instanceof AggregateError)) return false;
+  const failures = error.errors as unknown[];
+  return failures.length > 0 && failures.every((failure) => isRetiredEntityFailure(failure));
+}
+
 class LobbyOverloadedError extends Error {}
 
 export class ShaLobbyRuntime {
@@ -113,7 +145,10 @@ export class ShaLobbyRuntime {
   readonly #portalCooldowns = new Map<string, number>();
   readonly #portalSelections = new Map<string, { first?: Position; second?: Position }>();
   readonly #pendingActions = new Set<Promise<void>>();
+  readonly #inactiveSidebars = new Set<string>();
+  readonly #inactiveSidebarPlayers = new Map<string, string>();
   readonly #sidebarSessions = new Map<string, SidebarSession>();
+  readonly #sidebarUpdates = new Map<string, Promise<void>>();
   readonly #transferCooldowns = new Map<string, number>();
   readonly #visibility = new Map<string, Visibility>();
   readonly #visualizers = new Set<string>();
@@ -184,6 +219,7 @@ export class ShaLobbyRuntime {
       for (const online of onlinePlayersNow) {
         const id = await playerUniqueId(online);
         if (await this.isManagedPlayer(online)) {
+          this.activateSidebar(online, id);
           this.#visibility.set(id, this.configuration.settings.visibility.default);
           await this.giveItems(online);
           await this.updateSidebar(online, onlinePlayersNow.length);
@@ -238,6 +274,8 @@ export class ShaLobbyRuntime {
         for (const online of onlinePlayersNow)
           try {
             if (await this.isManagedPlayer(online)) {
+              const id = await playerUniqueId(online);
+              this.activateSidebar(online, id);
               await this.giveItems(online);
               await this.updateSidebar(online, onlinePlayersNow.length);
               await this.applyVisibility(online);
@@ -412,7 +450,10 @@ export class ShaLobbyRuntime {
     this.#tasks = [];
     this.#deferredTasks.clear();
     this.#pendingActions.clear();
+    this.#inactiveSidebars.clear();
+    this.#inactiveSidebarPlayers.clear();
     this.#sidebarSessions.clear();
+    this.#sidebarUpdates.clear();
     this.#menuSessions.clear();
     this.#itemCooldowns.clear();
     this.#initializedPlayers.clear();
@@ -426,6 +467,13 @@ export class ShaLobbyRuntime {
     this.#itemKey = undefined;
     this.#persistentString = undefined;
     this.#configuration = undefined;
+  }
+
+  private activateSidebar(current: Ref<'org.bukkit.entity.Player'>, id: string): void {
+    const inactive = this.#inactiveSidebarPlayers.get(id);
+    if (inactive !== undefined) this.#inactiveSidebars.delete(inactive);
+    this.#inactiveSidebarPlayers.delete(id);
+    this.#inactiveSidebars.delete(current.$identity);
   }
 
   public async join(event: PaperHandle): Promise<void> {
@@ -447,13 +495,19 @@ export class ShaLobbyRuntime {
 
   private async initializeJoinedPlayer(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
     const id = await playerUniqueId(current);
+    this.activateSidebar(current, id);
     this.#visibility.set(id, this.configuration.settings.visibility.default);
-    if (this.configuration.settings.join.reset) await this.resetPlayer(current);
-    else await this.giveItems(current);
+    const initialized = await Promise.allSettled([
+      this.updateSidebar(current),
+      this.configuration.settings.join.reset ? this.resetPlayer(current) : this.giveItems(current),
+    ]);
+    const failures = rejectionReasons(initialized);
+    if (failures.length > 0)
+      throw new AggregateError(failures, 'Player presentation initialization failed.');
     if (this.configuration.settings.join.teleport && this.configuration.spawn.configured)
       await this.teleportToSpawn(current);
     for (const viewer of await onlinePlayers()) await this.applyVisibility(viewer);
-    const playerName = await call<string>(current, 'getName');
+    const playerName = await callExact<string>(current, 'getName', '()Ljava/lang/String;');
     await this.executeAction(current, {
       type: 'title',
       target: this.configuration.settings.join['welcome-title'],
@@ -473,7 +527,6 @@ export class ShaLobbyRuntime {
         player: playerName,
       }),
     );
-    await this.updateSidebar(current);
   }
 
   private async replayPendingJoins(): Promise<void> {
@@ -500,7 +553,16 @@ export class ShaLobbyRuntime {
 
   public async quit(event: PaperHandle): Promise<void> {
     const current = await call<Ref<'org.bukkit.entity.Player'>>(event, 'getPlayer');
-    const id = await playerUniqueId(current);
+    const sidebarKey = current.$identity;
+    this.#inactiveSidebars.add(sidebarKey);
+    const [id, playerEntityId] = await Promise.all([
+      playerUniqueId(current),
+      call<number>(current, 'getEntityId'),
+    ]);
+    const previouslyInactive = this.#inactiveSidebarPlayers.get(id);
+    if (previouslyInactive !== undefined) this.#inactiveSidebars.delete(previouslyInactive);
+    this.#inactiveSidebarPlayers.delete(id);
+    this.#inactiveSidebars.add(sidebarKey);
     this.#initializedPlayers.delete(id);
     this.#pendingJoins.delete(id);
     const menu = this.#menuSessions.get(id);
@@ -509,15 +571,35 @@ export class ShaLobbyRuntime {
     this.#portalSelections.delete(id);
     this.#occupiedPortals.delete(id);
     this.#visualizers.delete(id);
-    const sidebar = this.#sidebarSessions.get(id);
-    this.#sidebarSessions.delete(id);
-    if (menu !== undefined || sidebar !== undefined)
+    const sidebarUpdate = this.#sidebarUpdates.get(sidebarKey);
+    const existingSidebar = this.#sidebarSessions.get(id);
+    const sidebar =
+      existingSidebar?.playerEntityId === playerEntityId ? existingSidebar : undefined;
+    if (sidebar !== undefined) this.#sidebarSessions.delete(id);
+    if (menu !== undefined || sidebar !== undefined || sidebarUpdate !== undefined) {
       runOutsidePaperFrame(() => {
         this.startDetached('Player quit cleanup', async () => {
-          await menu?.inventory.$release();
-          if (sidebar !== undefined) await this.releaseSidebar(sidebar);
+          try {
+            await sidebarUpdate?.catch(() => undefined);
+            const currentSidebar = this.#sidebarSessions.get(id);
+            const latestSidebar =
+              currentSidebar?.playerEntityId === playerEntityId ? currentSidebar : undefined;
+            if (latestSidebar !== undefined) this.#sidebarSessions.delete(id);
+            const releases: Promise<void>[] = [];
+            if (menu !== undefined) releases.push(menu.inventory.$release().then(() => undefined));
+            if (sidebar !== undefined) releases.push(this.releaseSidebar(sidebar));
+            if (latestSidebar !== undefined && latestSidebar !== sidebar)
+              releases.push(this.releaseSidebar(latestSidebar));
+            const results = await Promise.allSettled(releases);
+            const failures = rejectionReasons(results);
+            if (failures.length > 0)
+              throw new AggregateError(failures, 'Player quit cleanup was incomplete.');
+          } finally {
+            this.#inactiveSidebars.delete(sidebarKey);
+          }
         });
       });
+    } else this.#inactiveSidebars.delete(sidebarKey);
   }
 
   public async protect(
@@ -566,6 +648,7 @@ export class ShaLobbyRuntime {
     }
     if (!(await this.isManagedPlayer(current))) {
       await this.deferPlayer(current, async () => {
+        this.activateSidebar(current, id);
         this.#visibility.set(id, this.configuration.settings.visibility.default);
         await this.giveItems(current);
         await this.updateSidebar(current);
@@ -595,7 +678,11 @@ export class ShaLobbyRuntime {
     await this.deferPlayer(current, async () => {
       if (this.#occupiedPortals.get(id) !== portal.id) return;
       const currentPortal = await this.portalAt(
-        await call<Ref<'org.bukkit.Location'>>(current, 'getLocation'),
+        await callExact<Ref<'org.bukkit.Location'>>(
+          current,
+          'getLocation',
+          '()Lorg/bukkit/Location;',
+        ),
       );
       if (currentPortal?.id !== portal.id) return;
       if (
@@ -656,7 +743,11 @@ export class ShaLobbyRuntime {
     const current = await call<Ref<'org.bukkit.entity.Player'>>(event, 'getWhoClicked');
     if (!(await this.isManagedPlayer(current))) return;
     const currentItem = await call<PaperHandle | null>(event, 'getCurrentItem');
-    const cursor = await call<PaperHandle | null>(event, 'getCursor');
+    const cursor = await callExact<PaperHandle | null>(
+      event,
+      'getCursor',
+      '()Lorg/bukkit/inventory/ItemStack;',
+    );
     const managedItem =
       (currentItem !== null && (await this.managedItemId(currentItem)) !== undefined) ||
       (cursor !== null && (await this.managedItemId(cursor)) !== undefined);
@@ -911,7 +1002,11 @@ export class ShaLobbyRuntime {
 
   private async setSpawn(id: string): Promise<ManagedLobbyResult> {
     const current = await this.requirePlayer(id);
-    const location = await call<Ref<'org.bukkit.Location'>>(current, 'getLocation');
+    const location = await callExact<Ref<'org.bukkit.Location'>>(
+      current,
+      'getLocation',
+      '()Lorg/bukkit/Location;',
+    );
     const world = await call<Ref<'org.bukkit.World'>>(location, 'getWorld');
     const spawn = {
       configured: true,
@@ -949,8 +1044,12 @@ export class ShaLobbyRuntime {
   }
 
   private async resetPlayer(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
-    const inventory = await call<PaperHandle>(current, 'getInventory');
-    await call(inventory, 'clear');
+    const inventory = await callExact<PaperHandle>(
+      current,
+      'getInventory',
+      '()Lorg/bukkit/inventory/PlayerInventory;',
+    );
+    await inventoryCall(inventory, 'clear', '()V');
     await call(current, 'closeInventory');
     await call(current, 'setGameMode', await constant('org.bukkit.GameMode', 'ADVENTURE'));
     for (const effect of await call<readonly PaperHandle[]>(current, 'getActivePotionEffects'))
@@ -993,7 +1092,11 @@ export class ShaLobbyRuntime {
     const meta = await call<PaperHandle | null>(item, 'getItemMeta');
     if (meta === null || this.#itemKey === undefined || this.#persistentString === undefined)
       return undefined;
-    const container = await call<PaperHandle>(meta, 'getPersistentDataContainer');
+    const container = await callExact<PaperHandle>(
+      meta,
+      'getPersistentDataContainer',
+      '()Lorg/bukkit/persistence/PersistentDataContainer;',
+    );
     const value = await call<string | null>(
       container,
       'get',
@@ -1015,7 +1118,11 @@ export class ShaLobbyRuntime {
     if (meta !== null) {
       await call(meta, 'displayName', await component(definition.name));
       await call(meta, 'lore', await Promise.all(definition.lore.map(component)));
-      const container = await call<PaperHandle>(meta, 'getPersistentDataContainer');
+      const container = await callExact<PaperHandle>(
+        meta,
+        'getPersistentDataContainer',
+        '()Lorg/bukkit/persistence/PersistentDataContainer;',
+      );
       await call(container, 'set', this.#itemKey, this.#persistentString, managedId);
       await call(item, 'setItemMeta', meta);
     }
@@ -1023,17 +1130,31 @@ export class ShaLobbyRuntime {
   }
 
   private async giveItems(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
-    const inventory = await call<PaperHandle>(current, 'getInventory');
-    const contents = await call<readonly (PaperHandle | null)[]>(inventory, 'getContents');
+    const inventory = await callExact<PaperHandle>(
+      current,
+      'getInventory',
+      '()Lorg/bukkit/inventory/PlayerInventory;',
+    );
+    const contents = await inventoryCall<readonly (PaperHandle | null)[]>(
+      inventory,
+      'getContents',
+      '()[Lorg/bukkit/inventory/ItemStack;',
+    );
     for (const [slot, existing] of contents.entries())
       if (existing !== null && (await this.managedItemId(existing)) !== undefined)
-        await callExact(inventory, 'setItem', '(ILorg/bukkit/inventory/ItemStack;)V', slot, null);
+        await inventoryCall(
+          inventory,
+          'setItem',
+          '(ILorg/bukkit/inventory/ItemStack;)V',
+          slot,
+          null,
+        );
     for (const definition of this.configuration.items) {
       const item = await this.createItem(
         definition,
         definition.id ?? `slot-${String(definition.slot)}`,
       );
-      await callExact(
+      await inventoryCall(
         inventory,
         'setItem',
         '(ILorg/bukkit/inventory/ItemStack;)V',
@@ -1044,15 +1165,39 @@ export class ShaLobbyRuntime {
   }
 
   private async removeManagedItems(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
-    const inventory = await call<PaperHandle>(current, 'getInventory');
-    const contents = await call<readonly (PaperHandle | null)[]>(inventory, 'getContents');
+    const inventory = await callExact<PaperHandle>(
+      current,
+      'getInventory',
+      '()Lorg/bukkit/inventory/PlayerInventory;',
+    );
+    const contents = await inventoryCall<readonly (PaperHandle | null)[]>(
+      inventory,
+      'getContents',
+      '()[Lorg/bukkit/inventory/ItemStack;',
+    );
     for (const [slot, existing] of contents.entries())
       if (existing !== null && (await this.managedItemId(existing)) !== undefined)
-        await callExact(inventory, 'setItem', '(ILorg/bukkit/inventory/ItemStack;)V', slot, null);
+        await inventoryCall(
+          inventory,
+          'setItem',
+          '(ILorg/bukkit/inventory/ItemStack;)V',
+          slot,
+          null,
+        );
   }
 
   private async leaveManagedPlayer(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
-    const id = await playerUniqueId(current);
+    const sidebarKey = current.$identity;
+    this.#inactiveSidebars.add(sidebarKey);
+    const [id, playerEntityId] = await Promise.all([
+      playerUniqueId(current),
+      call<number>(current, 'getEntityId'),
+    ]);
+    const previouslyInactive = this.#inactiveSidebarPlayers.get(id);
+    if (previouslyInactive !== undefined) this.#inactiveSidebars.delete(previouslyInactive);
+    this.#inactiveSidebarPlayers.set(id, sidebarKey);
+    this.#inactiveSidebars.add(sidebarKey);
+    await this.#sidebarUpdates.get(sidebarKey)?.catch(() => undefined);
     await this.removeManagedItems(current);
     const menu = this.#menuSessions.get(id);
     if (menu !== undefined) {
@@ -1060,16 +1205,28 @@ export class ShaLobbyRuntime {
       await menu.inventory.$release();
       this.#menuSessions.delete(id);
     }
-    const sidebar = this.#sidebarSessions.get(id);
+    const existingSidebar = this.#sidebarSessions.get(id);
+    const sidebar =
+      existingSidebar?.playerEntityId === playerEntityId ? existingSidebar : undefined;
     if (sidebar !== undefined) {
       const manager = await staticExact<PaperHandle>(
         Bukkit,
         'getScoreboardManager',
         '()Lorg/bukkit/scoreboard/ScoreboardManager;',
       );
-      await call(current, 'setScoreboard', await call<PaperHandle>(manager, 'getMainScoreboard'));
-      await this.releaseSidebar(sidebar);
-      this.#sidebarSessions.delete(id);
+      const main = await callExact<PaperHandle>(
+        manager,
+        'getMainScoreboard',
+        '()Lorg/bukkit/scoreboard/Scoreboard;',
+      );
+      try {
+        await callExact(current, 'setScoreboard', '(Lorg/bukkit/scoreboard/Scoreboard;)V', main);
+        await this.releaseSidebar(sidebar);
+        if (this.#sidebarSessions.get(id) === sidebar) this.#sidebarSessions.delete(id);
+      } finally {
+        await main.$release();
+        await manager.$release();
+      }
     }
     for (const target of await onlinePlayers()) await call(current, 'showPlayer', plugin, target);
     this.#visibility.delete(id);
@@ -1088,8 +1245,17 @@ export class ShaLobbyRuntime {
       lore: ['<#A8B3C7>Izquierdo: posición 1', '<#A8B3C7>Derecho: posición 2'],
       action: { type: 'none' },
     };
-    const inventory = await call<PaperHandle>(current, 'getInventory');
-    await call(inventory, 'addItem', await this.createItem(wand, WAND_ID));
+    const inventory = await callExact<PaperHandle>(
+      current,
+      'getInventory',
+      '()Lorg/bukkit/inventory/PlayerInventory;',
+    );
+    await inventoryCall(
+      inventory,
+      'addItem',
+      '([Lorg/bukkit/inventory/ItemStack;)Ljava/util/HashMap;',
+      await this.createItem(wand, WAND_ID),
+    );
   }
 
   private async openMenu(current: Ref<'org.bukkit.entity.Player'>, id: string): Promise<void> {
@@ -1134,7 +1300,7 @@ export class ShaLobbyRuntime {
         current,
         'playSound',
         '(Lorg/bukkit/Location;Lorg/bukkit/Sound;FF)V',
-        await call(current, 'getLocation'),
+        await callExact(current, 'getLocation', '()Lorg/bukkit/Location;'),
         await constant('org.bukkit.Sound', String(sound['sound'])),
         Number(sound['volume']),
         Number(sound['pitch']),
@@ -1163,7 +1329,11 @@ export class ShaLobbyRuntime {
         'spawnParticle',
         '(Lorg/bukkit/Particle;Lorg/bukkit/Location;IDDDD)V',
         await constant('org.bukkit.Particle', String(asset['particle'])),
-        await call<Ref<'org.bukkit.Location'>>(current, 'getLocation'),
+        await callExact<Ref<'org.bukkit.Location'>>(
+          current,
+          'getLocation',
+          '()Lorg/bukkit/Location;',
+        ),
         Number(asset['count']),
         Number(asset['offset-x']),
         Number(asset['offset-y']),
@@ -1239,6 +1409,7 @@ export class ShaLobbyRuntime {
 
   private async reportDetachedFailure(message: string, error: unknown): Promise<void> {
     if (this.#closed) return;
+    if (isRetiredEntityFailure(error)) return;
     try {
       if ((await paperJava.describe())['platformEnabled'] === false) return;
     } catch {
@@ -1350,7 +1521,13 @@ export class ShaLobbyRuntime {
     selected?: Ref<'org.bukkit.Location'>,
   ): Promise<ManagedLobbyResult> {
     const id = await playerUniqueId(current);
-    const location = selected ?? (await call<Ref<'org.bukkit.Location'>>(current, 'getLocation'));
+    const location =
+      selected ??
+      (await callExact<Ref<'org.bukkit.Location'>>(
+        current,
+        'getLocation',
+        '()Lorg/bukkit/Location;',
+      ));
     const world = await call<Ref<'org.bukkit.World'>>(location, 'getWorld');
     const position: Position = {
       world: await call<string>(world, 'getName'),
@@ -1624,13 +1801,17 @@ export class ShaLobbyRuntime {
   private async refreshSidebars(): Promise<void> {
     if (this.#closed) return;
     const online = await onlinePlayers();
-    for (const current of online) {
-      if (await this.isManagedPlayer(current)) await this.updateSidebar(current, online.length);
-      else {
-        const id = await playerUniqueId(current);
-        if (this.#sidebarSessions.has(id)) await this.leaveManagedPlayer(current);
-      }
-    }
+    const refreshed = await Promise.allSettled(
+      online.map(async (current) => {
+        if (await this.isManagedPlayer(current)) await this.updateSidebar(current, online.length);
+        else {
+          const id = await playerUniqueId(current);
+          if (this.#sidebarSessions.has(id)) await this.leaveManagedPlayer(current);
+        }
+      }),
+    );
+    const failures = rejectionReasons(refreshed);
+    if (failures.length > 0) throw new AggregateError(failures, 'Sidebar refresh was incomplete.');
   }
 
   private async enforceLobby(): Promise<void> {
@@ -1661,7 +1842,34 @@ export class ShaLobbyRuntime {
     current: Ref<'org.bukkit.entity.Player'>,
     onlineCount?: number,
   ): Promise<void> {
-    const id = await playerUniqueId(current);
+    const key = current.$identity;
+    if (this.#inactiveSidebars.has(key)) return;
+    const previous = this.#sidebarUpdates.get(key) ?? Promise.resolve();
+    const update = previous
+      .catch(() => undefined)
+      .then(async () => {
+        if (this.#inactiveSidebars.has(key)) return;
+        const [id, playerEntityId] = await Promise.all([
+          playerUniqueId(current),
+          call<number>(current, 'getEntityId'),
+        ]);
+        if (!this.#inactiveSidebars.has(key))
+          await this.updateSidebarNow(current, id, playerEntityId, onlineCount);
+      });
+    this.#sidebarUpdates.set(key, update);
+    try {
+      await update;
+    } finally {
+      if (this.#sidebarUpdates.get(key) === update) this.#sidebarUpdates.delete(key);
+    }
+  }
+
+  private async updateSidebarNow(
+    current: Ref<'org.bukkit.entity.Player'>,
+    id: string,
+    playerEntityId: number,
+    onlineCount?: number,
+  ): Promise<void> {
     if (!this.configuration.sidebar.enabled) {
       const existing = this.#sidebarSessions.get(id);
       if (existing !== undefined) {
@@ -1670,89 +1878,235 @@ export class ShaLobbyRuntime {
           'getScoreboardManager',
           '()Lorg/bukkit/scoreboard/ScoreboardManager;',
         );
-        await call(current, 'setScoreboard', await call<PaperHandle>(manager, 'getMainScoreboard'));
-        await this.releaseSidebar(existing);
-        this.#sidebarSessions.delete(id);
+        const main = await callExact<PaperHandle>(
+          manager,
+          'getMainScoreboard',
+          '()Lorg/bukkit/scoreboard/Scoreboard;',
+        );
+        try {
+          await callExact(current, 'setScoreboard', '(Lorg/bukkit/scoreboard/Scoreboard;)V', main);
+          await this.releaseSidebar(existing);
+          this.#sidebarSessions.delete(id);
+        } finally {
+          await main.$release();
+          await manager.$release();
+        }
       }
       return;
     }
-    let session = this.#sidebarSessions.get(id);
-    if (session === undefined) {
-      session = await this.createSidebar(current);
-      this.#sidebarSessions.set(id, session);
-    } else {
-      const assigned = await call<PaperHandle>(current, 'getScoreboard');
-      if (!paperJava.same(assigned, session.scoreboard))
-        await call(current, 'setScoreboard', session.scoreboard);
-      await assigned.$release();
+    const [location, playerName, resolvedOnlineCount, ping] = await Promise.all([
+      callExact<Ref<'org.bukkit.Location'>>(current, 'getLocation', '()Lorg/bukkit/Location;'),
+      callExact<string>(current, 'getName', '()Ljava/lang/String;'),
+      onlineCount === undefined
+        ? onlinePlayers().then((players) => players.length)
+        : Promise.resolve(onlineCount),
+      call<number>(current, 'getPing'),
+    ]);
+    let world: Ref<'org.bukkit.World'> | undefined;
+    let replacements: Record<string, string | number>;
+    try {
+      const [resolvedWorld, x, y, z] = await Promise.all([
+        call<Ref<'org.bukkit.World'>>(location, 'getWorld'),
+        call<number>(location, 'getBlockX'),
+        call<number>(location, 'getBlockY'),
+        call<number>(location, 'getBlockZ'),
+      ]);
+      world = resolvedWorld;
+      replacements = {
+        player: playerName,
+        online: resolvedOnlineCount,
+        world: await call<string>(world, 'getName'),
+        x,
+        y,
+        z,
+        ping,
+        visibility: this.#visibility.get(id) ?? this.configuration.settings.visibility.default,
+      };
+    } finally {
+      await world?.$release();
+      await location.$release();
     }
     const frame =
       Math.floor(Date.now() / 1_000) % this.configuration.sidebar['title-frames'].length;
-    await call(
-      session.objective,
-      'displayName',
-      await component(this.configuration.sidebar['title-frames'][frame] ?? 'ShaLobby'),
+    const title = message(
+      this.configuration.sidebar['title-frames'][frame] ?? 'ShaLobby',
+      replacements,
     );
-    const location = await call<Ref<'org.bukkit.Location'>>(current, 'getLocation');
-    const world = await call<Ref<'org.bukkit.World'>>(location, 'getWorld');
-    const replacements: Record<string, string | number> = {
-      player: await call<string>(current, 'getName'),
-      online: onlineCount ?? (await onlinePlayers()).length,
-      world: await call<string>(world, 'getName'),
-      x: await call<number>(location, 'getBlockX'),
-      y: await call<number>(location, 'getBlockY'),
-      z: await call<number>(location, 'getBlockZ'),
-      ping: await call<number>(current, 'getPing'),
-      visibility: this.#visibility.get(id) ?? this.configuration.settings.visibility.default,
-    };
-    await Promise.all(
-      session.teams.map(async (team, index) =>
-        call(
-          team,
-          'prefix',
-          await component(message(this.configuration.sidebar.lines[index] ?? '', replacements)),
-        ),
-      ),
-    );
+    const lines = this.configuration.sidebar.lines.map((line) => message(line, replacements));
+    let session = this.#sidebarSessions.get(id);
+    if (session?.playerEntityId !== playerEntityId || session.scores.length !== lines.length) {
+      const previous = session;
+      session = await this.createSidebar(current, playerEntityId, title, lines);
+      this.#sidebarSessions.set(id, session);
+      if (previous !== undefined) await this.releaseSidebar(previous);
+      return;
+    }
+    const assigned = await call<PaperHandle>(current, 'getScoreboard');
+    try {
+      const updates: Promise<void>[] = [];
+      if (session.title !== title)
+        updates.push(
+          (async () => {
+            const rendered = await component(title);
+            try {
+              await callExact(
+                session.objective,
+                'displayName',
+                '(Lnet/kyori/adventure/text/Component;)V',
+                rendered,
+              );
+            } finally {
+              await rendered.$release();
+            }
+          })(),
+        );
+      for (const [index, line] of lines.entries()) {
+        const score = session.scores[index];
+        if (score !== undefined && session.lines[index] !== line)
+          updates.push(
+            (async () => {
+              const rendered = await component(line);
+              try {
+                await callExact(
+                  score,
+                  'customName',
+                  '(Lnet/kyori/adventure/text/Component;)V',
+                  rendered,
+                );
+              } finally {
+                await rendered.$release();
+              }
+            })(),
+          );
+      }
+      const updated = await Promise.allSettled(updates);
+      const failures = rejectionReasons(updated);
+      if (failures.length > 0) throw new AggregateError(failures, 'Sidebar update was incomplete.');
+      session.title = title;
+      session.lines = [...lines];
+      if (!paperJava.same(assigned, session.scoreboard))
+        await callExact(
+          current,
+          'setScoreboard',
+          '(Lorg/bukkit/scoreboard/Scoreboard;)V',
+          session.scoreboard,
+        );
+    } finally {
+      await assigned.$release();
+    }
   }
 
-  private async createSidebar(current: Ref<'org.bukkit.entity.Player'>): Promise<SidebarSession> {
+  private async createSidebar(
+    current: Ref<'org.bukkit.entity.Player'>,
+    playerEntityId: number,
+    title: string,
+    lines: readonly string[],
+  ): Promise<SidebarSession> {
     const manager = await staticExact<PaperHandle>(
       Bukkit,
       'getScoreboardManager',
       '()Lorg/bukkit/scoreboard/ScoreboardManager;',
     );
-    const scoreboard = await call<PaperHandle>(manager, 'getNewScoreboard');
-    const objective = await callExact<PaperHandle>(
-      scoreboard,
-      'registerNewObjective',
-      '(Ljava/lang/String;Ljava/lang/String;Lnet/kyori/adventure/text/Component;)Lorg/bukkit/scoreboard/Objective;',
-      'shalobby',
-      'dummy',
-      await component('ShaLobby'),
-    );
-    await call(
-      objective,
-      'setDisplaySlot',
-      await constant('org.bukkit.scoreboard.DisplaySlot', DISPLAY_SLOT),
-    );
-    const teams: PaperHandle[] = [];
-    const entries = '0123456789abcdef';
-    for (const [index] of this.configuration.sidebar.lines.entries()) {
-      const entry = `§${entries[index] ?? 'r'}`;
-      const team = await call<PaperHandle>(scoreboard, 'registerNewTeam', `line${String(index)}`);
-      await call(team, 'addEntry', entry);
-      const score = await call<PaperHandle>(objective, 'getScore', entry);
-      await call(score, 'setScore', this.configuration.sidebar.lines.length - index);
-      await score.$release();
-      teams.push(team);
+    let titleComponent: PaperHandle | undefined;
+    try {
+      titleComponent = await component(title);
+      const displaySlot = await constant('org.bukkit.scoreboard.DisplaySlot', DISPLAY_SLOT);
+      let scoreboard: PaperHandle | undefined;
+      let objective: PaperHandle | undefined;
+      const createdScores: (PaperHandle | undefined)[] = Array.from({ length: lines.length });
+      try {
+        scoreboard = await callExact<PaperHandle>(
+          manager,
+          'getNewScoreboard',
+          '()Lorg/bukkit/scoreboard/Scoreboard;',
+        );
+        const registeredObjective = await callExact<PaperHandle>(
+          scoreboard,
+          'registerNewObjective',
+          '(Ljava/lang/String;Ljava/lang/String;Lnet/kyori/adventure/text/Component;)Lorg/bukkit/scoreboard/Objective;',
+          'shalobby',
+          'dummy',
+          titleComponent,
+        );
+        objective = registeredObjective;
+        await callExact(
+          registeredObjective,
+          'setDisplaySlot',
+          '(Lorg/bukkit/scoreboard/DisplaySlot;)V',
+          displaySlot,
+        );
+        const scoreResults = await Promise.allSettled(
+          lines.map(async (line, index) => {
+            const score = await callExact<PaperHandle>(
+              registeredObjective,
+              'getScore',
+              '(Ljava/lang/String;)Lorg/bukkit/scoreboard/Score;',
+              `line-${String(index)}`,
+            );
+            createdScores[index] = score;
+            const rendered = await component(line);
+            try {
+              const configured = await Promise.allSettled([
+                callExact(score, 'customName', '(Lnet/kyori/adventure/text/Component;)V', rendered),
+                callExact(score, 'setScore', '(I)V', lines.length - index),
+              ]);
+              const failures = rejectionReasons(configured);
+              if (failures.length > 0)
+                throw new AggregateError(
+                  failures,
+                  `Sidebar row ${String(index)} could not be configured.`,
+                );
+            } finally {
+              await rendered.$release();
+            }
+            return score;
+          }),
+        );
+        const failures = rejectionReasons(scoreResults);
+        if (failures.length > 0)
+          throw new AggregateError(failures, 'Sidebar rows could not be created.');
+        const scores = scoreResults.map((result) => {
+          if (result.status === 'rejected') throw result.reason;
+          return result.value;
+        });
+        await callExact(
+          current,
+          'setScoreboard',
+          '(Lorg/bukkit/scoreboard/Scoreboard;)V',
+          scoreboard,
+        );
+        return {
+          scoreboard,
+          objective,
+          playerEntityId,
+          scores,
+          title,
+          lines: [...lines],
+        };
+      } catch (error: unknown) {
+        const releases = [
+          ...createdScores.flatMap((score) => (score === undefined ? [] : [score.$release()])),
+          ...(objective === undefined ? [] : [objective.$release()]),
+          ...(scoreboard === undefined ? [] : [scoreboard.$release()]),
+        ];
+        const releaseResults = await Promise.allSettled(releases);
+        const releaseFailures = rejectionReasons(releaseResults);
+        if (releaseFailures.length > 0)
+          throw new AggregateError(
+            [error, ...releaseFailures],
+            'Sidebar creation failed and cleanup was incomplete.',
+            { cause: error },
+          );
+        throw error;
+      }
+    } finally {
+      await titleComponent?.$release();
+      await manager.$release();
     }
-    await call(current, 'setScoreboard', scoreboard);
-    return { scoreboard, objective, teams };
   }
 
   private async releaseSidebar(session: SidebarSession): Promise<void> {
-    for (const team of session.teams) await team.$release();
+    for (const score of session.scores) await score.$release();
     await session.objective.$release();
     await session.scoreboard.$release();
   }

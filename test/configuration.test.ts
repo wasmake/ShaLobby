@@ -51,4 +51,21 @@ describe('lobby configuration', () => {
 
     await expect(new LobbyConfigurationStore().load()).rejects.toThrow('unknown menu');
   });
+
+  it('rejects an enabled sidebar without visible lines', async () => {
+    contents.set(
+      'scoreboard.yml',
+      `sidebar:
+  enabled: true
+  interval-ticks: 20
+  title-frames:
+    - ShaLobby
+  lines: []
+`,
+    );
+
+    await expect(new LobbyConfigurationStore().load()).rejects.toThrow(
+      'cannot be empty while enabled',
+    );
+  });
 });
