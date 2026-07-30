@@ -1505,12 +1505,11 @@ export class ShaLobbyRuntime {
       ...candidate.menus.flatMap((menu) => menu.slots.map((item) => item.material)),
       'BLAZE_ROD',
     ]);
-    for (const material of materials)
-      await (await constant('org.bukkit.Material', material)).$release();
+    for (const material of materials) await constant('org.bukkit.Material', material);
     for (const matched of candidate.messagesContent.matchAll(/^ {4}sound: ([A-Z0-9_]+)$/gmu))
       await (await constant('org.bukkit.Sound', matched[1] ?? '')).$release();
     for (const matched of candidate.messagesContent.matchAll(/^ {4}particle: ([A-Z0-9_]+)$/gmu))
-      await (await constant('org.bukkit.Particle', matched[1] ?? '')).$release();
+      await constant('org.bukkit.Particle', matched[1] ?? '');
     for (const settings of candidate.settings.worlds) {
       const world = await staticExact<Ref<'org.bukkit.World'> | null>(
         Bukkit,
@@ -1882,7 +1881,6 @@ export class ShaLobbyRuntime {
               z,
               1,
             );
-    await particle.$release();
   }
 }
 

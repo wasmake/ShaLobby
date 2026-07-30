@@ -9,6 +9,14 @@ export type Ref<Name extends keyof GeneratedJavaTypeMap = keyof GeneratedJavaTyp
   GeneratedJavaTypeMap[Name]
 >;
 
+export interface PaperEnumConstant<Name extends string = string> {
+  readonly $paperEnum: Name;
+  readonly name: string;
+}
+
+export type Constant<Name extends keyof GeneratedJavaTypeMap> =
+  (typeof JAVA_TYPES)[Name]['kind'] extends 'enum' ? PaperEnumConstant<Name> : Ref<Name>;
+
 export const Bukkit = paperJava.resolve(JAVA_TYPES['org.bukkit.Bukkit']);
 export const plugin = paperJava.plugin;
 
@@ -69,15 +77,15 @@ export function construct<Name extends keyof GeneratedJavaTypeMap>(
 export function constant<Name extends keyof GeneratedJavaTypeMap>(
   type: Name,
   name: string,
-): Promise<Ref<Name>> {
+): Promise<Constant<Name>> {
   const javaType = JAVA_TYPES[type];
   const descriptor = `L${javaType.javaName.replaceAll('.', '/')};`;
   if (javaType.kind === 'enum') {
     return paperJava
       .resolve(javaType)
-      .$invoke<Ref<Name>>('valueOf', `(Ljava/lang/String;)${descriptor}`, name);
+      .$invoke<Constant<Name>>('valueOf', `(Ljava/lang/String;)${descriptor}`, name);
   }
-  return paperJava.resolve(javaType).$get<Ref<Name>>(name, descriptor);
+  return paperJava.resolve(javaType).$get<Constant<Name>>(name, descriptor);
 }
 
 export async function player(id: string): Promise<Ref<'org.bukkit.entity.Player'> | null> {

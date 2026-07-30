@@ -16,7 +16,8 @@ describe('generated Paper field access', () => {
     ['org.bukkit.Material', 'COMPASS'],
     ['org.bukkit.Particle', 'END_ROD'],
   ] as const)('resolves %s#%s through its generated valueOf member', async (type, name) => {
-    const paperJava = vi.fn(() => null);
+    const result = { $paperEnum: type, name };
+    const paperJava = vi.fn(() => result);
     Reflect.set(globalThis, 'host', {
       paperJava,
       registerCallback: vi.fn(() => true),
@@ -24,7 +25,7 @@ describe('generated Paper field access', () => {
     });
     const descriptor = `L${type.replaceAll('.', '/')};`;
 
-    await constant(type, name);
+    await expect(constant(type, name)).resolves.toEqual(result);
 
     expect(paperJava).toHaveBeenCalledWith({
       operation: 'invoke',
