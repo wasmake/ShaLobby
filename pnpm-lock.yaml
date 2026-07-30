@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: false
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@shamoo/bundler@0.1.0-rc.2': 1eea150b1a66d27895c3cfb82acf9f305799d6aa00f782bc2aa74599ceda1249
+
 importers:
   .:
     dependencies:
@@ -2284,14 +2287,14 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.62.2':
     optional: true
 
-  '@shamoo/bundler@0.1.0-rc.2':
+  '@shamoo/bundler@0.1.0-rc.2(patch_hash=1eea150b1a66d27895c3cfb82acf9f305799d6aa00f782bc2aa74599ceda1249)':
     dependencies:
       '@shamoo/metadata': 0.1.0-rc.2
       esbuild: 0.27.7
 
   '@shamoo/cli@0.1.0-rc.2':
     dependencies:
-      '@shamoo/bundler': 0.1.0-rc.2
+      '@shamoo/bundler': 0.1.0-rc.2(patch_hash=1eea150b1a66d27895c3cfb82acf9f305799d6aa00f782bc2aa74599ceda1249)
       '@shamoo/compiler': 0.1.0-rc.2
       '@shamoo/core': 0.1.0-rc.2
       '@shamoo/create-plugin': 0.1.0-rc.2

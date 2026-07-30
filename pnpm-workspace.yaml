@@ -8,3 +8,6 @@ strictPeerDependencies: true
 
 allowBuilds:
   esbuild: true
+
+patchedDependencies:
+  '@shamoo/bundler@0.1.0-rc.2': patches/@shamoo__bundler@0.1.0-rc.2.patch

@@ -243,6 +243,11 @@ async function buildHashes(): Promise<Readonly<Record<string, string>>> {
     'manifest.platforms.paper',
   );
   expect(paper).toMatchObject({ enabled: true, minecraft: '26.2', paperApi: '26.2' });
+  const bundle = await readFile(resolve(DIST, 'index.js'), 'utf8');
+  expect(bundle).not.toContain('Dynamic require of "');
+  expect(bundle).not.toMatch(
+    /\b(?:__require\(|require\(|from\s+|import\s*)["'](?:node:)?(?:buffer|process)["']/u,
+  );
   return Object.fromEntries(
     await Promise.all(
       BUILD_FILES.map(async (file) => {

@@ -1,0 +1,26 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index b29c38c565ac55894411aae6a1dfab84d4d80cad..397db6b4f2c2b3007c5fb3bb4a5c1ad5f96c50dc 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -115,7 +115,7 @@ async function bundlePlugin(request) {
+     format: "esm",
+     ignoreAnnotations: true,
+     legalComments: "none",
+-    platform: "node",
++    platform: "neutral",
+     plugins: [universalRuntime(request)],
+     sourcemap: "external",
+     sourcesContent: true,
+diff --git a/dist/index.js b/dist/index.js
+index 65b75d6fc4e434271f612e2cc4049357dd40d60f..88bd2d74c5e41663a34b04b3d585ce8608e4d799 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -90,7 +90,7 @@ async function bundlePlugin(request) {
+     format: "esm",
+     ignoreAnnotations: true,
+     legalComments: "none",
+-    platform: "node",
++    platform: "neutral",
+     plugins: [universalRuntime(request)],
+     sourcemap: "external",
+     sourcesContent: true,
