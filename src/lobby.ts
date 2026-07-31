@@ -59,6 +59,17 @@ interface MenuSession {
   readonly menu: LobbyMenu;
 }
 
+interface PreparedMenu {
+  readonly items: readonly (PaperHandle | null)[];
+  readonly menu: LobbyMenu;
+  readonly title: PaperHandle;
+}
+
+interface PreparedPresentation {
+  readonly menus: Map<string, PreparedMenu>;
+  readonly titles: Map<string, PaperHandle>;
+}
+
 interface SidebarSession {
   readonly scoreboard: PaperHandle;
   readonly objective: PaperHandle;
@@ -164,6 +175,8 @@ export class ShaLobbyRuntime {
   readonly #pendingActions = new Set<Promise<void>>();
   readonly #inactiveSidebars = new Set<string>();
   readonly #inactiveSidebarPlayers = new Map<string, string>();
+  readonly #preparedMenus = new Map<string, PreparedMenu>();
+  readonly #preparedTitles = new Map<string, PaperHandle>();
   readonly #sidebarSessions = new Map<string, SidebarSession>();
   readonly #sidebarUpdates = new Map<string, Promise<void>>();
   readonly #transferCooldowns = new Map<string, number>();
@@ -222,6 +235,7 @@ export class ShaLobbyRuntime {
     const previousVisibility = new Map(this.#visibility);
     this.#reloading = true;
     this.#revision++;
+    let preparedPresentation: PreparedPresentation | undefined;
     try {
       await this.stopTasks();
       await this.stopPendingMoves();
@@ -250,10 +264,19 @@ export class ShaLobbyRuntime {
         }
         this.#initializedPlayers.add(id);
       }
-      await this.replayPendingJoins();
+      preparedPresentation = await this.preparePresentation();
       await this.restartTasks();
+      await this.installPreparedPresentation(preparedPresentation);
+      preparedPresentation = undefined;
     } catch (error) {
       const rollbackFailures: unknown[] = [];
+      if (preparedPresentation !== undefined) {
+        try {
+          await this.releasePresentation(preparedPresentation);
+        } catch (rollbackError: unknown) {
+          rollbackFailures.push(rollbackError);
+        }
+      }
       let onlinePlayersNow: readonly Ref<'org.bukkit.entity.Player'>[] = [];
       try {
         onlinePlayersNow = await onlinePlayers();
@@ -307,12 +330,12 @@ export class ShaLobbyRuntime {
           } catch (restartError: unknown) {
             rollbackFailures.push(restartError);
           }
-        try {
-          await this.replayPendingJoins();
-          await this.restartTasks();
-        } catch (restartError: unknown) {
-          rollbackFailures.push(restartError);
-        }
+        for (const operation of [() => this.replayPendingJoins(), () => this.restartTasks()])
+          try {
+            await operation();
+          } catch (restartError: unknown) {
+            rollbackFailures.push(restartError);
+          }
       }
       if (rollbackFailures.length > 0)
         throw new AggregateError(
@@ -324,7 +347,11 @@ export class ShaLobbyRuntime {
     } finally {
       this.#reloading = false;
     }
-    await this.replayPendingJoins();
+    try {
+      await this.replayPendingJoins();
+    } catch (error: unknown) {
+      console.error('[ShaLobby] Pending joins could not be replayed after reload.', error);
+    }
     return {
       ok: true,
       state: 'reloaded',
@@ -426,6 +453,7 @@ export class ShaLobbyRuntime {
       await attempt(() => this.releaseSidebar(session));
     for (const session of this.#menuSessions.values())
       await attempt(() => session.inventory.$release().then(() => undefined));
+    await attempt(() => this.releasePreparedPresentation());
     if (!replacementPresent)
       await attempt(async () => {
         const messenger = await staticExact<PaperHandle>(
@@ -475,6 +503,8 @@ export class ShaLobbyRuntime {
     this.#sidebarSessions.clear();
     this.#sidebarUpdates.clear();
     this.#menuSessions.clear();
+    this.#preparedMenus.clear();
+    this.#preparedTitles.clear();
     this.#itemCooldowns.clear();
     this.#initializedPlayers.clear();
     this.#portalCooldowns.clear();
@@ -507,24 +537,18 @@ export class ShaLobbyRuntime {
       await callExact(event, 'joinMessage', '(Lnet/kyori/adventure/text/Component;)V', null);
     await this.deferPlayer(current, async () => {
       try {
-        await this.initializeJoinedPlayer(current, false);
+        await this.initializeJoinedPlayer(current);
       } finally {
         this.#pendingJoins.delete(id);
       }
     });
-    const welcomeFailures = await this.welcomeJoinedPlayer(current);
-    if (welcomeFailures.length > 0)
-      console.error('[ShaLobby] Player welcome feedback was incomplete.', welcomeFailures);
   }
 
-  private async initializeJoinedPlayer(
-    current: Ref<'org.bukkit.entity.Player'>,
-    welcome = true,
-  ): Promise<void> {
+  private async initializeJoinedPlayer(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
     const id = await playerUniqueId(current);
     this.activateSidebar(current, id);
     this.#visibility.set(id, this.configuration.settings.visibility.default);
-    const failures = welcome ? await this.welcomeJoinedPlayer(current) : [];
+    const failures = await this.welcomeJoinedPlayer(current);
     const initialized = await Promise.allSettled([
       this.updateSidebar(current),
       this.configuration.settings.join.reset ? this.resetPlayer(current) : this.giveItems(current),
@@ -554,15 +578,20 @@ export class ShaLobbyRuntime {
   }
 
   private async replayPendingJoins(): Promise<void> {
+    const failures: unknown[] = [];
     for (const [id, current] of [...this.#pendingJoins]) {
       if (this.#pendingJoins.get(id) !== current) continue;
       try {
-        if (await this.isManagedPlayer(current)) await this.initializeJoinedPlayer(current, false);
+        if (await this.isManagedPlayer(current)) await this.initializeJoinedPlayer(current);
         this.#initializedPlayers.add(id);
+      } catch (error: unknown) {
+        failures.push(error);
       } finally {
         this.#pendingJoins.delete(id);
       }
     }
+    if (failures.length > 0)
+      throw new AggregateError(failures, 'One or more pending joins could not be replayed.');
   }
 
   private async welcomeJoinedPlayer(current: Ref<'org.bukkit.entity.Player'>): Promise<unknown[]> {
@@ -1297,20 +1326,31 @@ export class ShaLobbyRuntime {
 
   private async managedItemId(item: PaperHandle): Promise<string | undefined> {
     const meta = await call<PaperHandle | null>(item, 'getItemMeta');
-    if (meta === null || this.#itemKey === undefined || this.#persistentString === undefined)
+    if (meta === null) return undefined;
+    if (this.#itemKey === undefined || this.#persistentString === undefined) {
+      await meta.$release();
       return undefined;
-    const container = await callExact<PaperHandle>(
-      meta,
-      'getPersistentDataContainer',
-      '()Lorg/bukkit/persistence/PersistentDataContainer;',
-    );
-    const value = await call<string | null>(
-      container,
-      'get',
-      this.#itemKey,
-      this.#persistentString,
-    );
-    return value ?? undefined;
+    }
+    let container: PaperHandle | undefined;
+    try {
+      container = await callExact<PaperHandle>(
+        meta,
+        'getPersistentDataContainer',
+        '()Lorg/bukkit/persistence/PersistentDataContainer;',
+      );
+      const value = await call<string | null>(
+        container,
+        'get',
+        this.#itemKey,
+        this.#persistentString,
+      );
+      return value ?? undefined;
+    } finally {
+      await Promise.allSettled([
+        meta.$release(),
+        ...(container === undefined ? [] : [container.$release()]),
+      ]);
+    }
   }
 
   private async createItem(definition: LobbyItem, managedId: string): Promise<PaperHandle> {
@@ -1321,19 +1361,51 @@ export class ShaLobbyRuntime {
       material,
       definition.amount,
     );
-    const meta = await call<PaperHandle | null>(item, 'getItemMeta');
-    if (meta !== null) {
-      await call(meta, 'displayName', await component(definition.name));
-      await call(meta, 'lore', await Promise.all(definition.lore.map(component)));
-      const container = await callExact<PaperHandle>(
-        meta,
-        'getPersistentDataContainer',
-        '()Lorg/bukkit/persistence/PersistentDataContainer;',
-      );
-      await call(container, 'set', this.#itemKey, this.#persistentString, managedId);
-      await call(item, 'setItemMeta', meta);
+    try {
+      const meta = await call<PaperHandle | null>(item, 'getItemMeta');
+      if (meta === null) return item;
+      let container: PaperHandle | undefined;
+      let rendered: PaperHandle[] = [];
+      try {
+        const components = await Promise.allSettled([
+          component(definition.name),
+          ...definition.lore.map(component),
+        ]);
+        rendered = components.flatMap((result) =>
+          result.status === 'fulfilled' ? [result.value] : [],
+        );
+        const failures = rejectionReasons(components);
+        if (failures.length > 0)
+          throw new AggregateError(failures, `Item ${managedId} could not be rendered.`);
+        const [name, ...lore] = rendered;
+        if (name === undefined) throw new Error(`Item ${managedId} has no display name.`);
+        await call(meta, 'displayName', name);
+        await call(meta, 'lore', lore);
+        container = await callExact<PaperHandle>(
+          meta,
+          'getPersistentDataContainer',
+          '()Lorg/bukkit/persistence/PersistentDataContainer;',
+        );
+        await call(container, 'set', this.#itemKey, this.#persistentString, managedId);
+        await call(item, 'setItemMeta', meta);
+      } finally {
+        await Promise.allSettled([
+          meta.$release(),
+          ...rendered.map((value) => value.$release()),
+          ...(container === undefined ? [] : [container.$release()]),
+        ]);
+      }
+      return item;
+    } catch (error: unknown) {
+      try {
+        await item.$release();
+      } catch (releaseError: unknown) {
+        throw new AggregateError([error, releaseError], `Item ${managedId} cleanup failed.`, {
+          cause: releaseError,
+        });
+      }
+      throw error;
     }
-    return item;
   }
 
   private async giveItems(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
@@ -1466,11 +1538,48 @@ export class ShaLobbyRuntime {
   }
 
   private async openMenu(current: Ref<'org.bukkit.entity.Player'>, id: string): Promise<void> {
-    const menu = this.configuration.menus.find((candidate) => candidate.id === id);
-    if (menu === undefined) throw new RangeError(`No existe el menú ${id}.`);
+    const prepared = this.#preparedMenus.get(id);
+    if (prepared === undefined) throw new RangeError(`No existe el menú ${id}.`);
+    const createdInventory = await staticExact<PaperHandle>(
+      Bukkit,
+      'createInventory',
+      '(Lorg/bukkit/inventory/InventoryHolder;ILnet/kyori/adventure/text/Component;)Lorg/bukkit/inventory/Inventory;',
+      null,
+      prepared.menu.rows * 9,
+      prepared.title,
+    );
+    let inventory: PaperHandle | undefined = createdInventory;
+    try {
+      const [playerIdResult, contentsResult] = await Promise.allSettled([
+        playerUniqueId(current),
+        inventoryCall(
+          createdInventory,
+          'setContents',
+          '([Lorg/bukkit/inventory/ItemStack;)V',
+          prepared.items,
+        ),
+      ]);
+      const failures = rejectionReasons([playerIdResult, contentsResult]);
+      if (failures.length > 0)
+        throw new AggregateError(failures, `Menu ${id} could not be opened.`);
+      if (playerIdResult.status !== 'fulfilled') throw playerIdResult.reason;
+      await call(current, 'openInventory', createdInventory);
+      const previous = this.#menuSessions.get(playerIdResult.value);
+      this.#menuSessions.set(playerIdResult.value, {
+        inventory: createdInventory,
+        menu: prepared.menu,
+      });
+      inventory = undefined;
+      if (previous !== undefined) await previous.inventory.$release();
+    } finally {
+      await inventory?.$release();
+    }
+  }
+
+  private async createMenu(menu: LobbyMenu): Promise<PreparedMenu> {
     const prepared = await Promise.allSettled([
       component(menu.title),
-      ...menu.slots.map((definition) => this.createItem(definition, `menu:${id}`)),
+      ...menu.slots.map((definition) => this.createItem(definition, `menu:${menu.id}`)),
     ]);
     const preparationFailures = rejectionReasons(prepared);
     if (preparationFailures.length > 0) {
@@ -1479,62 +1588,126 @@ export class ShaLobbyRuntime {
           result.status === 'fulfilled' ? [result.value.$release()] : [],
         ),
       );
-      throw new AggregateError(preparationFailures, `Menu ${id} could not be prepared.`);
+      throw new AggregateError(preparationFailures, `Menu ${menu.id} could not be prepared.`);
     }
     const titleResult = prepared[0];
-    if (titleResult.status !== 'fulfilled') throw new Error(`Menu ${id} has no title.`);
+    if (titleResult.status !== 'fulfilled') throw new Error(`Menu ${menu.id} has no title.`);
     const title = titleResult.value;
     const items = prepared.slice(1).map((result) => {
       if (result.status !== 'fulfilled') throw result.reason;
       return result.value;
     });
-    let inventory: PaperHandle | undefined;
-    try {
-      const createdInventory = await staticExact<PaperHandle>(
-        Bukkit,
-        'createInventory',
-        '(Lorg/bukkit/inventory/InventoryHolder;ILnet/kyori/adventure/text/Component;)Lorg/bukkit/inventory/Inventory;',
-        null,
-        menu.rows * 9,
-        title,
+    const contents: (PaperHandle | null)[] = Array.from({ length: menu.rows * 9 }, () => null);
+    for (const [index, definition] of menu.slots.entries())
+      contents[definition.slot] = items[index] ?? null;
+    return { items: contents, menu, title };
+  }
+
+  private async createTitle(id: string): Promise<PaperHandle> {
+    const asset = this.titleAsset(id);
+    const rendered = await Promise.allSettled([
+      component(String(asset['title'])),
+      component(String(asset['subtitle'])),
+    ]);
+    const renderingFailures = rejectionReasons(rendered);
+    if (renderingFailures.length > 0) {
+      const released = await Promise.allSettled(
+        rendered.flatMap((result) =>
+          result.status === 'fulfilled' ? [result.value.$release()] : [],
+        ),
       );
-      inventory = createdInventory;
-      const [playerIdResult, configured] = await Promise.all([
-        playerUniqueId(current).then(
-          (value) => ({ ok: true, value }) as const,
-          (error: unknown) => ({ error, ok: false }) as const,
-        ),
-        Promise.allSettled(
-          menu.slots.map((definition, index) =>
-            callExact(
-              createdInventory,
-              'setItem',
-              '(ILorg/bukkit/inventory/ItemStack;)V',
-              definition.slot,
-              items[index],
-            ),
-          ),
-        ),
-      ]);
-      const configurationFailures = rejectionReasons(configured);
-      if (!playerIdResult.ok)
-        throw new AggregateError(
-          [playerIdResult.error, ...configurationFailures],
-          `Menu ${id} could not resolve its player.`,
-        );
-      if (configurationFailures.length > 0)
-        throw new AggregateError(configurationFailures, `Menu ${id} could not be populated.`);
-      await call(current, 'openInventory', createdInventory);
-      const playerId = playerIdResult.value;
-      const previous = this.#menuSessions.get(playerId);
-      this.#menuSessions.set(playerId, { inventory: createdInventory, menu });
-      inventory = undefined;
-      if (previous !== undefined) await previous.inventory.$release();
-    } finally {
-      const releases = [title.$release(), ...items.map((item) => item.$release())];
-      if (inventory !== undefined) releases.push(inventory.$release());
-      await Promise.allSettled(releases);
+      throw new AggregateError(
+        [...renderingFailures, ...rejectionReasons(released)],
+        `Title ${id} could not be rendered.`,
+      );
     }
+    const [titleResult, subtitleResult] = rendered;
+    if (titleResult.status !== 'fulfilled' || subtitleResult.status !== 'fulfilled')
+      throw new Error(`Title ${id} has incomplete content.`);
+    try {
+      return await staticExact<PaperHandle>(
+        paperJava.resolve(JAVA_TYPES['net.kyori.adventure.title.Title']),
+        'title',
+        '(Lnet/kyori/adventure/text/Component;Lnet/kyori/adventure/text/Component;III)Lnet/kyori/adventure/title/Title;',
+        titleResult.value,
+        subtitleResult.value,
+        Number(asset['fade-in-ticks']),
+        Number(asset['stay-ticks']),
+        Number(asset['fade-out-ticks']),
+      );
+    } finally {
+      await Promise.allSettled([titleResult.value.$release(), subtitleResult.value.$release()]);
+    }
+  }
+
+  private async preparePresentation(): Promise<PreparedPresentation> {
+    const actions = [
+      ...this.configuration.items.map((item) => item.action),
+      ...this.configuration.menus.flatMap((menu) => menu.slots.map((item) => item.action)),
+      ...this.configuration.portals.map((portal) => portal.action),
+    ];
+    const titleIds = new Set([
+      this.configuration.settings.join['welcome-title'],
+      ...actions.flatMap((action) =>
+        action.type === 'title' && action.target !== undefined ? [action.target] : [],
+      ),
+    ]);
+    const prepared: PreparedPresentation = { menus: new Map(), titles: new Map() };
+    try {
+      for (const menu of this.configuration.menus)
+        prepared.menus.set(menu.id, await this.createMenu(menu));
+      for (const id of titleIds) prepared.titles.set(id, await this.createTitle(id));
+      return prepared;
+    } catch (error: unknown) {
+      try {
+        await this.releasePresentation(prepared);
+      } catch (releaseError: unknown) {
+        throw new AggregateError(
+          [error, releaseError],
+          'Lobby presentation preparation and cleanup failed.',
+          { cause: releaseError },
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async installPreparedPresentation(prepared: PreparedPresentation): Promise<void> {
+    const previous: PreparedPresentation = {
+      menus: new Map(this.#preparedMenus),
+      titles: new Map(this.#preparedTitles),
+    };
+    this.#preparedMenus.clear();
+    this.#preparedTitles.clear();
+    for (const [id, menu] of prepared.menus) this.#preparedMenus.set(id, menu);
+    for (const [id, title] of prepared.titles) this.#preparedTitles.set(id, title);
+    try {
+      await this.releasePresentation(previous);
+    } catch (error: unknown) {
+      console.error('[ShaLobby] Previous prepared presentation cleanup failed.', error);
+    }
+  }
+
+  private async releasePresentation(prepared: PreparedPresentation): Promise<void> {
+    const handles: PaperHandle[] = [...prepared.titles.values()];
+    for (const menu of prepared.menus.values()) {
+      handles.push(menu.title);
+      for (const item of menu.items) if (item !== null) handles.push(item);
+    }
+    const released = await Promise.allSettled(handles.map((handle) => handle.$release()));
+    const failures = rejectionReasons(released);
+    if (failures.length > 0)
+      throw new AggregateError(failures, 'Prepared lobby presentation could not be released.');
+  }
+
+  private async releasePreparedPresentation(): Promise<void> {
+    const prepared: PreparedPresentation = {
+      menus: new Map(this.#preparedMenus),
+      titles: new Map(this.#preparedTitles),
+    };
+    this.#preparedMenus.clear();
+    this.#preparedTitles.clear();
+    await this.releasePresentation(prepared);
   }
 
   private async executeAction(
@@ -1563,48 +1736,9 @@ export class ShaLobbyRuntime {
       return;
     }
     if (action.type === 'title' && action.target !== undefined) {
-      const asset = this.titleAsset(action.target);
-      const rendered = await Promise.allSettled([
-        component(String(asset['title'])),
-        component(String(asset['subtitle'])),
-      ]);
-      const renderingFailures = rejectionReasons(rendered);
-      if (renderingFailures.length > 0) {
-        const released = await Promise.allSettled(
-          rendered.flatMap((result) =>
-            result.status === 'fulfilled' ? [result.value.$release()] : [],
-          ),
-        );
-        throw new AggregateError(
-          [...renderingFailures, ...rejectionReasons(released)],
-          `Title ${action.target} could not be rendered.`,
-        );
-      }
-      const [titleResult, subtitleResult] = rendered;
-      if (titleResult.status !== 'fulfilled' || subtitleResult.status !== 'fulfilled')
-        throw new Error(`Title ${action.target} has incomplete content.`);
-      const titleComponent = titleResult.value;
-      const subtitleComponent = subtitleResult.value;
-      let title: PaperHandle | undefined;
-      try {
-        title = await staticExact<PaperHandle>(
-          paperJava.resolve(JAVA_TYPES['net.kyori.adventure.title.Title']),
-          'title',
-          '(Lnet/kyori/adventure/text/Component;Lnet/kyori/adventure/text/Component;III)Lnet/kyori/adventure/title/Title;',
-          titleComponent,
-          subtitleComponent,
-          Number(asset['fade-in-ticks']),
-          Number(asset['stay-ticks']),
-          Number(asset['fade-out-ticks']),
-        );
-        await callExact(current, 'showTitle', '(Lnet/kyori/adventure/title/Title;)V', title);
-      } finally {
-        await Promise.allSettled([
-          titleComponent.$release(),
-          subtitleComponent.$release(),
-          ...(title === undefined ? [] : [title.$release()]),
-        ]);
-      }
+      const title = this.#preparedTitles.get(action.target);
+      if (title === undefined) throw new RangeError(`No existe el título ${action.target}.`);
+      await callExact(current, 'showTitle', '(Lnet/kyori/adventure/title/Title;)V', title);
       return;
     }
     if (action.type === 'particle' && action.target !== undefined) {
@@ -2233,7 +2367,6 @@ export class ShaLobbyRuntime {
           this.#initializedPlayers.add(id);
           continue;
         }
-        await this.giveItems(current);
         await this.applyVisibility(current);
         await this.visualizePortals(current);
       } else if (!this.#initializedPlayers.has(id)) {
