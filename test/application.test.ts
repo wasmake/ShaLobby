@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ShaLobbyApplication } from '../src/application.js';
 import {
@@ -157,6 +157,50 @@ describe('ShaLobby startup and reload', () => {
     await expect(second).resolves.toMatchObject({ runtime: { state: 'reloaded' } });
     expect(calls).toEqual([{ operation: 'reload' }, { operation: 'reload' }]);
     expect(application.messages.render('spawn-requested')).toContain('Candidate 2');
+  });
+
+  it('owns runtime shutdown and clears the accepted state', async () => {
+    const shutdown = vi.fn(() => Promise.resolve());
+    const application = new ShaLobbyApplication(
+      new ManagedLobbyClient((request) =>
+        Promise.resolve(request.operation === 'ensure' ? ensured() : reloaded('messages: {}\n')),
+      ),
+      new MessageCatalog(),
+      shutdown,
+    );
+    await application.start();
+
+    await application.stop();
+
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(application.configurationAccepted).toBe(false);
+    await expect(application.reload()).rejects.toThrow('stopping');
+  });
+
+  it('waits for an active reload before shutting down', async () => {
+    let finishReload: (() => void) | undefined;
+    const reloadPending = new Promise<void>((resolve) => {
+      finishReload = resolve;
+    });
+    const shutdown = vi.fn(() => Promise.resolve());
+    const application = new ShaLobbyApplication(
+      new ManagedLobbyClient(async (request) => {
+        if (request.operation === 'reload') await reloadPending;
+        return request.operation === 'ensure' ? ensured() : reloaded('messages: {}\n');
+      }),
+      new MessageCatalog(),
+      shutdown,
+    );
+
+    const reload = application.reload();
+    const stop = application.stop();
+    await Promise.resolve();
+    expect(shutdown).not.toHaveBeenCalled();
+
+    finishReload?.();
+    await expect(reload).resolves.toMatchObject({ runtime: { state: 'reloaded' } });
+    await expect(stop).resolves.toBeUndefined();
+    expect(shutdown).toHaveBeenCalledOnce();
   });
 });
 

@@ -71,6 +71,29 @@ export class MessageConfigurationError extends Error {
   }
 }
 
+export function parseMessageEntries(value: unknown): Readonly<Record<string, string>> {
+  if (value === undefined || value === null)
+    return Object.freeze(Object.create(null) as Record<string, string>);
+  const messages = mapping(value, 'messages.yml.messages');
+  const entries = Object.entries(messages);
+  if (entries.length > MAX_MESSAGES) {
+    throw new MessageConfigurationError(
+      `messages.yml.messages no puede contener más de ${String(MAX_MESSAGES)} entradas.`,
+    );
+  }
+  const result = Object.create(null) as Record<string, string>;
+  for (const [key, message] of entries) {
+    if (!MESSAGE_ID.test(key)) {
+      throw new MessageConfigurationError(`La clave de mensaje ${key} no es válida.`);
+    }
+    if (typeof message !== 'string' || message.length > MAX_MESSAGE_LENGTH) {
+      throw new MessageConfigurationError(`El mensaje ${key} debe ser texto de longitud válida.`);
+    }
+    result[key] = message;
+  }
+  return Object.freeze(result);
+}
+
 function mapping(value: unknown, path: string): Readonly<Record<string, unknown>> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new MessageConfigurationError(`${path} debe ser un mapa.`);
@@ -82,7 +105,12 @@ function mapping(value: unknown, path: string): Readonly<Record<string, unknown>
   return value as Readonly<Record<string, unknown>>;
 }
 
-export function parseMessageConfiguration(source: string): Readonly<Record<string, string>> {
+export interface ParsedMessageDocument {
+  readonly root: Readonly<Record<string, unknown>>;
+  readonly messages: Readonly<Record<string, string>>;
+}
+
+export function parseMessageDocument(source: string): ParsedMessageDocument {
   if (source.length > 1_048_576) {
     throw new MessageConfigurationError('messages.yml supera el límite de 1 MiB.');
   }
@@ -104,29 +132,15 @@ export function parseMessageConfiguration(source: string): Readonly<Record<strin
       );
     }
     const root = mapping(document.toJS({ maxAliasCount: 16 }), 'messages.yml');
-    if (root['messages'] === undefined || root['messages'] === null) return Object.freeze({});
-    const messages = mapping(root['messages'], 'messages.yml.messages');
-    const entries = Object.entries(messages);
-    if (entries.length > MAX_MESSAGES) {
-      throw new MessageConfigurationError(
-        `messages.yml.messages no puede contener más de ${String(MAX_MESSAGES)} entradas.`,
-      );
-    }
-    const result: Record<string, string> = {};
-    for (const [key, value] of entries) {
-      if (!MESSAGE_ID.test(key)) {
-        throw new MessageConfigurationError(`La clave de mensaje ${key} no es válida.`);
-      }
-      if (typeof value !== 'string' || value.length > MAX_MESSAGE_LENGTH) {
-        throw new MessageConfigurationError(`El mensaje ${key} debe ser texto de longitud válida.`);
-      }
-      result[key] = value;
-    }
-    return Object.freeze(result);
+    return Object.freeze({ root, messages: parseMessageEntries(root['messages']) });
   } catch (error: unknown) {
     if (error instanceof MessageConfigurationError) throw error;
     throw new MessageConfigurationError('No se pudo analizar messages.yml.', { cause: error });
   }
+}
+
+export function parseMessageConfiguration(source: string): Readonly<Record<string, string>> {
+  return parseMessageDocument(source).messages;
 }
 
 function escapeMiniMessage(value: boolean | number | string): string {

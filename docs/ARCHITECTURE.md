@@ -23,6 +23,22 @@ ShamooRuntime responsibilities:
 - Provide policy-confined persistent text files.
 - Release handles, callbacks, listeners, and tasks with the plugin generation.
 
+## Internal Boundaries
+
+ShaLobby follows one dependency direction:
+
+1. `application.ts` owns plugin startup, reload, and shutdown.
+2. `commands.ts` and `events.ts` adapt framework input into lobby operations.
+3. `lobby.ts` coordinates stateful use cases and Paper resources.
+4. `domain/` contains synchronous business rules with no Paper handles or file access.
+5. `configuration.ts` builds the validated snapshot consumed by the runtime.
+6. `api.ts` is the low-level generated Paper bridge boundary.
+
+Configuration values are decoded once. In particular, message templates, titles, sounds, and
+particles are retained as immutable typed resources; gameplay code must not reinterpret raw YAML.
+Expected domain decisions should be represented as typed results, while exceptions are reserved for
+invalid configuration or infrastructure failures.
+
 ## Paper Calls
 
 `@shamoo/paper-raw` exports `JAVA_TYPES` and `paperJava`. Calls are asynchronous because Paper and

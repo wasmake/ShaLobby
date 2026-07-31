@@ -27,23 +27,16 @@ import {
   type LobbyPortal,
   type Visibility,
 } from './configuration.js';
+import { normalizePortalSelection, selectPortal, type LobbyPosition } from './domain/portals.js';
 import type {
   ManagedLobbyExecuteAction,
   ManagedLobbyData,
   ManagedLobbyRequest,
   ManagedLobbyResult,
 } from './managed-lobby.js';
-import { MessageCatalog } from './messages.js';
 
 function data(value: unknown): ManagedLobbyData {
   return value as ManagedLobbyData;
-}
-
-interface Position {
-  readonly world: string;
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
 }
 
 interface WorldSettingsSnapshot {
@@ -177,7 +170,7 @@ export class ShaLobbyRuntime {
   readonly #pendingJoins = new Map<string, Ref<'org.bukkit.entity.Player'>>();
   readonly #pendingMoves = new Map<string, MovementMailbox>();
   readonly #portalCooldowns = new Map<string, number>();
-  readonly #portalSelections = new Map<string, { first?: Position; second?: Position }>();
+  readonly #portalSelections = new Map<string, { first?: LobbyPosition; second?: LobbyPosition }>();
   readonly #pendingActions = new Set<Promise<void>>();
   readonly #inactiveSidebars = new Set<string>();
   readonly #inactiveSidebarPlayers = new Map<string, string>();
@@ -1210,10 +1203,10 @@ export class ShaLobbyRuntime {
     >,
   ): Promise<ManagedLobbyResult> {
     if (action.action === 'portal-create') {
-      const selection = this.#portalSelections.get(action.player);
-      if (selection?.first === undefined || selection.second === undefined)
+      const selection = normalizePortalSelection(this.#portalSelections.get(action.player) ?? {});
+      if (!selection.ok && selection.reason === 'incomplete')
         throw new Error('Selecciona las dos posiciones antes de crear el portal.');
-      if (selection.first.world !== selection.second.world)
+      if (!selection.ok)
         throw new Error('Las posiciones del portal deben estar en el mismo mundo.');
       if (this.configuration.portals.some((portal) => portal.id === action.id))
         throw new Error(`El portal ${action.id} ya existe.`);
@@ -1227,17 +1220,9 @@ export class ShaLobbyRuntime {
       const portal: LobbyPortal = {
         id: action.id,
         enabled: action.enabled ?? true,
-        world: selection.first.world,
-        min: {
-          x: Math.min(selection.first.x, selection.second.x),
-          y: Math.min(selection.first.y, selection.second.y),
-          z: Math.min(selection.first.z, selection.second.z),
-        },
-        max: {
-          x: Math.max(selection.first.x, selection.second.x),
-          y: Math.max(selection.first.y, selection.second.y),
-          z: Math.max(selection.first.z, selection.second.z),
-        },
+        world: selection.world,
+        min: selection.min,
+        max: selection.max,
         ...(action.permission === undefined ? {} : { permission: action.permission }),
         priority: action.priority ?? 0,
         'cooldown-ms': action['cooldown-ms'] ?? this.configuration.settings['portal-cooldown-ms'],
@@ -1698,10 +1683,7 @@ export class ShaLobbyRuntime {
 
   private async createTitle(id: string): Promise<PaperHandle> {
     const asset = this.titleAsset(id);
-    const rendered = await Promise.allSettled([
-      component(String(asset['title'])),
-      component(String(asset['subtitle'])),
-    ]);
+    const rendered = await Promise.allSettled([component(asset.title), component(asset.subtitle)]);
     const renderingFailures = rejectionReasons(rendered);
     if (renderingFailures.length > 0) {
       const released = await Promise.allSettled(
@@ -1724,9 +1706,9 @@ export class ShaLobbyRuntime {
         '(Lnet/kyori/adventure/text/Component;Lnet/kyori/adventure/text/Component;III)Lnet/kyori/adventure/title/Title;',
         titleResult.value,
         subtitleResult.value,
-        Number(asset['fade-in-ticks']),
-        Number(asset['stay-ticks']),
-        Number(asset['fade-out-ticks']),
+        asset['fade-in-ticks'],
+        asset['stay-ticks'],
+        asset['fade-out-ticks'],
       );
     } finally {
       await Promise.allSettled([titleResult.value.$release(), subtitleResult.value.$release()]);
@@ -2195,9 +2177,9 @@ export class ShaLobbyRuntime {
         'playSound',
         '(Lorg/bukkit/Location;Lorg/bukkit/Sound;FF)V',
         await callExact(current, 'getLocation', '()Lorg/bukkit/Location;'),
-        await constant('org.bukkit.Sound', String(sound['sound'])),
-        Number(sound['volume']),
-        Number(sound['pitch']),
+        await constant('org.bukkit.Sound', sound.sound),
+        sound.volume,
+        sound.pitch,
       );
       return;
     }
@@ -2213,17 +2195,17 @@ export class ShaLobbyRuntime {
         current,
         'spawnParticle',
         '(Lorg/bukkit/Particle;Lorg/bukkit/Location;IDDDD)V',
-        await constant('org.bukkit.Particle', String(asset['particle'])),
+        await constant('org.bukkit.Particle', asset.particle),
         await callExact<Ref<'org.bukkit.Location'>>(
           current,
           'getLocation',
           '()Lorg/bukkit/Location;',
         ),
-        Number(asset['count']),
-        Number(asset['offset-x']),
-        Number(asset['offset-y']),
-        Number(asset['offset-z']),
-        Number(asset['speed']),
+        asset.count,
+        asset['offset-x'],
+        asset['offset-y'],
+        asset['offset-z'],
+        asset.speed,
       );
     }
   }
@@ -2540,7 +2522,7 @@ export class ShaLobbyRuntime {
         '()Lorg/bukkit/Location;',
       ));
     const world = await call<Ref<'org.bukkit.World'>>(location, 'getWorld');
-    const position: Position = {
+    const position: LobbyPosition = {
       world: await call<string>(world, 'getName'),
       x: await call<number>(location, 'getBlockX'),
       y: await call<number>(location, 'getBlockY'),
@@ -2575,19 +2557,7 @@ export class ShaLobbyRuntime {
     const x = await call<number>(location, 'getX');
     const y = await call<number>(location, 'getY');
     const z = await call<number>(location, 'getZ');
-    return this.configuration.portals
-      .filter(
-        (portal) =>
-          portal.enabled &&
-          portal.world === name &&
-          x >= portal.min.x &&
-          x <= portal.max.x &&
-          y >= portal.min.y &&
-          y <= portal.max.y &&
-          z >= portal.min.z &&
-          z <= portal.max.z,
-      )
-      .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))[0];
+    return selectPortal(this.configuration.portals, { world: name, x, y, z });
   }
 
   private async applyWorldSettings(): Promise<void> {
@@ -2701,7 +2671,6 @@ export class ShaLobbyRuntime {
   }
 
   private async preflight(candidate: LobbyConfiguration): Promise<void> {
-    new MessageCatalog().replace(candidate.messagesContent);
     const texts = [
       ...candidate.items.flatMap((item) => [item.name, ...item.lore]),
       ...candidate.menus.flatMap((menu) => [
@@ -2714,12 +2683,12 @@ export class ShaLobbyRuntime {
       candidate.presentation['player-list'].header,
       candidate.presentation['player-list'].footer,
       ...candidate.servers.map((server) => server['display-name']),
+      ...Object.values(candidate.messageResources.titles).flatMap((title) => [
+        title.title,
+        title.subtitle,
+      ]),
     ];
     for (const value of texts) await (await component(value)).$release();
-    for (const matched of candidate.messagesContent.matchAll(
-      / {4}(?:title|subtitle): ['"](.*?)['"]$/gmu,
-    ))
-      await (await component(matched[1] ?? '')).$release();
     const materials = new Set([
       ...candidate.items.map((item) => item.material),
       ...candidate.menus.flatMap((menu) => menu.slots.map((item) => item.material)),
@@ -2733,10 +2702,10 @@ export class ShaLobbyRuntime {
         candidate.presentation.bossbar.overlay,
       ),
     ]);
-    for (const matched of candidate.messagesContent.matchAll(/^ {4}sound: ([A-Z0-9_]+)$/gmu))
-      await (await constant('org.bukkit.Sound', matched[1] ?? '')).$release();
-    for (const matched of candidate.messagesContent.matchAll(/^ {4}particle: ([A-Z0-9_]+)$/gmu))
-      await constant('org.bukkit.Particle', matched[1] ?? '');
+    for (const sound of Object.values(candidate.messageResources.sounds))
+      await (await constant('org.bukkit.Sound', sound.sound)).$release();
+    for (const particle of Object.values(candidate.messageResources.particles))
+      await constant('org.bukkit.Particle', particle.particle);
     for (const settings of candidate.settings.worlds) {
       const world = await staticExact<Ref<'org.bukkit.World'> | null>(
         Bukkit,
@@ -3270,52 +3239,24 @@ export class ShaLobbyRuntime {
   }
 
   private message(key: string): string {
-    const root = this.configuration.messagesContent;
-    const matched = new RegExp(`^  ${key}: ['"]?(.*?)['"]?$`, 'mu').exec(root);
-    return matched?.[1] ?? key;
+    return this.configuration.messageResources.messages[key] ?? key;
   }
 
-  private soundAsset(id: string): Record<string, unknown> {
-    const parsed = this.configuration.messagesContent;
-    const sound = new RegExp(
-      `  - id: ${id}\\n    sound: ([A-Z0-9_]+)\\n    volume: ([0-9.]+)\\n    pitch: ([0-9.]+)`,
-      'u',
-    ).exec(parsed);
-    if (sound !== null)
-      return { sound: sound[1], volume: Number(sound[2]), pitch: Number(sound[3]) };
+  private soundAsset(id: string): LobbyConfiguration['messageResources']['sounds'][string] {
+    const sound = this.configuration.messageResources.sounds[id];
+    if (sound !== undefined) return sound;
     throw new RangeError(`No existe el recurso sounds.${id}.`);
   }
 
-  private titleAsset(id: string): Record<string, unknown> {
-    const title = new RegExp(
-      `  - id: ${id}\\n    title: ['"](.*?)['"]\\n    subtitle: ['"](.*?)['"]\\n    fade-in-ticks: ([0-9]+)\\n    stay-ticks: ([0-9]+)\\n    fade-out-ticks: ([0-9]+)`,
-      'u',
-    ).exec(this.configuration.messagesContent);
-    if (title !== null)
-      return {
-        title: title[1],
-        subtitle: title[2],
-        'fade-in-ticks': Number(title[3]),
-        'stay-ticks': Number(title[4]),
-        'fade-out-ticks': Number(title[5]),
-      };
+  private titleAsset(id: string): LobbyConfiguration['messageResources']['titles'][string] {
+    const title = this.configuration.messageResources.titles[id];
+    if (title !== undefined) return title;
     throw new RangeError(`No existe el recurso titles.${id}.`);
   }
 
-  private particleAsset(id: string): Record<string, unknown> {
-    const particle = new RegExp(
-      `  - id: ${id}\\n    particle: ([A-Z0-9_]+)\\n    count: ([0-9]+)\\n    offset-x: ([0-9.]+)\\n    offset-y: ([0-9.]+)\\n    offset-z: ([0-9.]+)\\n    speed: ([0-9.]+)`,
-      'u',
-    ).exec(this.configuration.messagesContent);
-    if (particle !== null)
-      return {
-        particle: particle[1],
-        count: Number(particle[2]),
-        'offset-x': Number(particle[3]),
-        'offset-y': Number(particle[4]),
-        'offset-z': Number(particle[5]),
-        speed: Number(particle[6]),
-      };
+  private particleAsset(id: string): LobbyConfiguration['messageResources']['particles'][string] {
+    const particle = this.configuration.messageResources.particles[id];
+    if (particle !== undefined) return particle;
     throw new RangeError(`No existe el recurso particles.${id}.`);
   }
 

@@ -1,6 +1,8 @@
 import { pluginFiles } from '@shamoo/config';
 import { parse, stringify } from 'yaml';
 
+import { parseMessageDocument } from './messages.js';
+
 export const LOBBY_FILES = Object.freeze([
   'config.yml',
   'messages.yml',
@@ -100,6 +102,36 @@ export interface LobbyPresentation {
   };
 }
 
+export interface LobbyTitleAsset {
+  readonly title: string;
+  readonly subtitle: string;
+  readonly 'fade-in-ticks': number;
+  readonly 'stay-ticks': number;
+  readonly 'fade-out-ticks': number;
+}
+
+export interface LobbySoundAsset {
+  readonly sound: string;
+  readonly volume: number;
+  readonly pitch: number;
+}
+
+export interface LobbyParticleAsset {
+  readonly particle: string;
+  readonly count: number;
+  readonly 'offset-x': number;
+  readonly 'offset-y': number;
+  readonly 'offset-z': number;
+  readonly speed: number;
+}
+
+export interface LobbyMessageResources {
+  readonly messages: Readonly<Record<string, string>>;
+  readonly titles: Readonly<Record<string, LobbyTitleAsset>>;
+  readonly sounds: Readonly<Record<string, LobbySoundAsset>>;
+  readonly particles: Readonly<Record<string, LobbyParticleAsset>>;
+}
+
 export interface LobbySettings {
   readonly join: {
     readonly 'suppress-message': boolean;
@@ -130,6 +162,7 @@ export type Visibility = 'all' | 'staff' | 'none';
 export interface LobbyConfiguration {
   readonly settings: LobbySettings;
   readonly messagesContent: string;
+  readonly messageResources: LobbyMessageResources;
   readonly items: readonly LobbyItem[];
   readonly menus: readonly LobbyMenu[];
   readonly sidebar: LobbySidebar;
@@ -567,7 +600,7 @@ export class LobbyConfigurationStore {
       parsed(contents['portals.yml'], 'portals.yml')['portals'],
       'portals.yml.portals',
     );
-    const messageRoot = parsed(contents['messages.yml'], 'messages.yml');
+    const { root: messageRoot, messages } = parseMessageDocument(contents['messages.yml']);
     keys(messageRoot, 'messages.yml', ['messages', 'titles', 'sounds', 'particles']);
     const titleValues = array(messageRoot['titles'], 'messages.yml.titles');
     const soundValues = array(messageRoot['sounds'], 'messages.yml.sounds');
@@ -586,6 +619,9 @@ export class LobbyConfigurationStore {
     const particleIds = new Set(
       particleValues.map((value) => String(record(value, 'particle')['id'])),
     );
+    const titles: Record<string, LobbyTitleAsset> = {};
+    const sounds: Record<string, LobbySoundAsset> = {};
+    const particles: Record<string, LobbyParticleAsset> = {};
     for (const [index, value] of titleValues.entries()) {
       const label = `messages.yml.titles[${String(index)}]`;
       const title = record(value, label);
@@ -597,11 +633,13 @@ export class LobbyConfigurationStore {
         'stay-ticks',
         'fade-out-ticks',
       ]);
-      text(title['title'], `${label}.title`);
-      text(title['subtitle'], `${label}.subtitle`);
-      integer(title['fade-in-ticks'], `${label}.fade-in-ticks`, 0, 72_000);
-      integer(title['stay-ticks'], `${label}.stay-ticks`, 0, 72_000);
-      integer(title['fade-out-ticks'], `${label}.fade-out-ticks`, 0, 72_000);
+      titles[String(title['id'])] = Object.freeze({
+        title: text(title['title'], `${label}.title`),
+        subtitle: text(title['subtitle'], `${label}.subtitle`),
+        'fade-in-ticks': integer(title['fade-in-ticks'], `${label}.fade-in-ticks`, 0, 72_000),
+        'stay-ticks': integer(title['stay-ticks'], `${label}.stay-ticks`, 0, 72_000),
+        'fade-out-ticks': integer(title['fade-out-ticks'], `${label}.fade-out-ticks`, 0, 72_000),
+      });
     }
     for (const [index, value] of soundValues.entries()) {
       const label = `messages.yml.sounds[${String(index)}]`;
@@ -609,8 +647,11 @@ export class LobbyConfigurationStore {
       keys(sound, label, ['id', 'sound', 'volume', 'pitch']);
       const name = text(sound['sound'], `${label}.sound`, 128);
       if (!/^[A-Z][A-Z0-9_]{0,127}$/u.test(name)) throw new TypeError(`${label}.sound is invalid.`);
-      finite(sound['volume'], `${label}.volume`, 0, 16);
-      finite(sound['pitch'], `${label}.pitch`, 0, 2);
+      sounds[String(sound['id'])] = Object.freeze({
+        sound: name,
+        volume: finite(sound['volume'], `${label}.volume`, 0, 16),
+        pitch: finite(sound['pitch'], `${label}.pitch`, 0, 2),
+      });
     }
     for (const [index, value] of particleValues.entries()) {
       const label = `messages.yml.particles[${String(index)}]`;
@@ -627,9 +668,14 @@ export class LobbyConfigurationStore {
       const name = text(particle['particle'], `${label}.particle`, 128);
       if (!/^[A-Z][A-Z0-9_]{0,127}$/u.test(name))
         throw new TypeError(`${label}.particle is invalid.`);
-      integer(particle['count'], `${label}.count`, 0, 10_000);
-      for (const property of ['offset-x', 'offset-y', 'offset-z', 'speed'])
-        finite(particle[property], `${label}.${property}`, 0, 1_000);
+      particles[String(particle['id'])] = Object.freeze({
+        particle: name,
+        count: integer(particle['count'], `${label}.count`, 0, 10_000),
+        'offset-x': finite(particle['offset-x'], `${label}.offset-x`, 0, 1_000),
+        'offset-y': finite(particle['offset-y'], `${label}.offset-y`, 0, 1_000),
+        'offset-z': finite(particle['offset-z'], `${label}.offset-z`, 0, 1_000),
+        speed: finite(particle['speed'], `${label}.speed`, 0, 1_000),
+      });
     }
     for (const [index, value] of menuValues.entries()) {
       const label = `menus.yml.menus[${String(index)}]`;
@@ -735,6 +781,12 @@ export class LobbyConfigurationStore {
     return Object.freeze({
       settings: settings as unknown as LobbySettings,
       messagesContent: contents['messages.yml'],
+      messageResources: Object.freeze({
+        messages,
+        titles: Object.freeze(titles),
+        sounds: Object.freeze(sounds),
+        particles: Object.freeze(particles),
+      }),
       items: itemValues,
       menus: menuValues as unknown as readonly LobbyMenu[],
       sidebar: sidebar as unknown as LobbySidebar,

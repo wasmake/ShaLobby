@@ -43,6 +43,43 @@ describe('lobby configuration', () => {
     expect(configuration.portals).toHaveLength(3);
     expect(configuration.presentation.bossbar.enabled).toBe(true);
     expect(configuration.presentation['player-list'].enabled).toBe(true);
+    expect(configuration.messageResources.messages['bienvenida']).toContain('Bienvenido');
+    expect(configuration.messageResources.titles['bienvenida']?.['stay-ticks']).toBe(60);
+    expect(configuration.messageResources.sounds['bienvenida']?.sound).toBe(
+      'UI_TOAST_CHALLENGE_COMPLETE',
+    );
+    expect(configuration.messageResources.particles['bienvenida']?.particle).toBe('HAPPY_VILLAGER');
+    expect(Reflect.get(configuration.messageResources.messages, 'constructor')).toBeUndefined();
+  });
+
+  it('decodes message resources independently of YAML field order', async () => {
+    contents.set(
+      'messages.yml',
+      String(contents.get('messages.yml')).replace(
+        `  - id: bienvenida
+    title: '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>'
+    subtitle: '<#A8B3C7>Tu aventura comienza aquí</#A8B3C7>'
+    fade-in-ticks: 10
+    stay-ticks: 60
+    fade-out-ticks: 20`,
+        `  - subtitle: '<#A8B3C7>Tu aventura comienza aquí</#A8B3C7>'
+    stay-ticks: 60
+    id: bienvenida
+    fade-out-ticks: 20
+    title: '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>'
+    fade-in-ticks: 10`,
+      ),
+    );
+
+    const resources = (await new LobbyConfigurationStore().load()).messageResources;
+
+    expect(resources.titles['bienvenida']).toEqual({
+      title: '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>',
+      subtitle: '<#A8B3C7>Tu aventura comienza aquí</#A8B3C7>',
+      'fade-in-ticks': 10,
+      'stay-ticks': 60,
+      'fade-out-ticks': 20,
+    });
   });
 
   it('rejects cross-file references to unavailable destinations', async () => {
@@ -52,6 +89,20 @@ describe('lobby configuration', () => {
     );
 
     await expect(new LobbyConfigurationStore().load()).rejects.toThrow('unknown menu');
+  });
+
+  it('rejects duplicate message keys before accepting the runtime snapshot', async () => {
+    contents.set(
+      'messages.yml',
+      String(contents.get('messages.yml')).replace(
+        'messages:\n',
+        'messages:\n  duplicate: first\n  duplicate: second\n',
+      ),
+    );
+
+    await expect(new LobbyConfigurationStore().load()).rejects.toThrow(
+      'messages.yml no es YAML válido',
+    );
   });
 
   it('rejects an enabled sidebar without visible lines', async () => {
