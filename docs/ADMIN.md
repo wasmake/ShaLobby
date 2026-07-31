@@ -7,6 +7,10 @@
 5. Edit `plugins/ShamooRuntime/plugin-data/shalobby/data/*.yml`.
 6. Run `/lobby reload`.
 
+Existing `scoreboard.yml` files without `presentation` automatically use the shipped Spanish shop
+bossbar and player-list animation. Add an explicit `presentation` section to customize or disable
+them.
+
 No `managed-lobby` Runtime section is required.
 
 Primary permissions:

@@ -83,6 +83,22 @@ export interface LobbySidebar {
   readonly lines: readonly string[];
 }
 
+export interface LobbyPresentation {
+  readonly 'interval-ticks': number;
+  readonly bossbar: {
+    readonly enabled: boolean;
+    readonly color: 'BLUE' | 'GREEN' | 'PINK' | 'PURPLE' | 'RED' | 'WHITE' | 'YELLOW';
+    readonly overlay: 'PROGRESS' | 'NOTCHED_6' | 'NOTCHED_10' | 'NOTCHED_12' | 'NOTCHED_20';
+    readonly progress: number;
+    readonly 'title-frames': readonly string[];
+  };
+  readonly 'player-list': {
+    readonly enabled: boolean;
+    readonly 'header-frames': readonly string[];
+    readonly 'footer-frames': readonly string[];
+  };
+}
+
 export interface LobbySettings {
   readonly join: {
     readonly 'suppress-message': boolean;
@@ -116,6 +132,7 @@ export interface LobbyConfiguration {
   readonly items: readonly LobbyItem[];
   readonly menus: readonly LobbyMenu[];
   readonly sidebar: LobbySidebar;
+  readonly presentation: LobbyPresentation;
   readonly servers: readonly LobbyServer[];
   readonly spawn: LobbySpawn;
   readonly portals: LobbyPortal[];
@@ -353,6 +370,94 @@ function validateSidebar(value: Record<string, unknown>): void {
   });
 }
 
+const DEFAULT_PRESENTATION: LobbyPresentation = {
+  'interval-ticks': 20,
+  bossbar: {
+    enabled: true,
+    color: 'PURPLE',
+    overlay: 'PROGRESS',
+    progress: 1,
+    'title-frames': [
+      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOBBY</bold></gradient> <#F8FAFC>Rangos, cosméticos y más</#F8FAFC>',
+      '<#FFB347><bold>OFERTAS EXCLUSIVAS</bold></#FFB347> <#F8FAFC>Visita nuestra tienda</#F8FAFC>',
+      '<#55FF88><bold>APOYA AL SERVIDOR</bold></#55FF88> <#F8FAFC>Descubre ventajas increíbles</#F8FAFC>',
+    ],
+  },
+  'player-list': {
+    enabled: true,
+    'header-frames': [
+      '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>\n<#A8B3C7>Bienvenido, <#F8FAFC>%player%</#F8FAFC></#A8B3C7>',
+      '<gradient:#A855F7:#4F7CFF:#38D9FF><bold>◆ SHALOBBY ◆</bold></gradient>\n<#A8B3C7>Elige tu próxima aventura</#A8B3C7>',
+    ],
+    'footer-frames': [
+      '<#A8B3C7>Jugadores en línea: <#F8FAFC>%online%</#F8FAFC></#A8B3C7>\n<#55FF88>¡Que disfrutes tu estancia!</#55FF88>',
+      '<#FFB347>Visita la tienda y descubre nuestras ofertas</#FFB347>\n<#A8B3C7>Gracias por jugar en ShaLobby</#A8B3C7>',
+    ],
+  },
+};
+
+function validatePresentation(value: unknown): LobbyPresentation {
+  if (value === undefined) return DEFAULT_PRESENTATION;
+  const presentation = record(value, 'scoreboard.yml.presentation');
+  keys(presentation, 'scoreboard.yml.presentation', ['interval-ticks', 'bossbar', 'player-list']);
+  integer(
+    presentation['interval-ticks'],
+    'scoreboard.yml.presentation.interval-ticks',
+    1,
+    1_728_000,
+  );
+  const bossbar = record(presentation['bossbar'], 'scoreboard.yml.presentation.bossbar');
+  keys(bossbar, 'scoreboard.yml.presentation.bossbar', [
+    'enabled',
+    'color',
+    'overlay',
+    'progress',
+    'title-frames',
+  ]);
+  const bossbarEnabled = bool(bossbar['enabled'], 'scoreboard.yml.presentation.bossbar.enabled');
+  if (
+    !['BLUE', 'GREEN', 'PINK', 'PURPLE', 'RED', 'WHITE', 'YELLOW'].includes(
+      String(bossbar['color']),
+    )
+  )
+    throw new TypeError('scoreboard.yml.presentation.bossbar.color is invalid.');
+  if (
+    !['PROGRESS', 'NOTCHED_6', 'NOTCHED_10', 'NOTCHED_12', 'NOTCHED_20'].includes(
+      String(bossbar['overlay']),
+    )
+  )
+    throw new TypeError('scoreboard.yml.presentation.bossbar.overlay is invalid.');
+  finite(bossbar['progress'], 'scoreboard.yml.presentation.bossbar.progress', 0, 1);
+  const titleFrames = array(
+    bossbar['title-frames'],
+    'scoreboard.yml.presentation.bossbar.title-frames',
+  );
+  if ((bossbarEnabled && titleFrames.length === 0) || titleFrames.length > 128)
+    throw new TypeError('scoreboard.yml.presentation.bossbar.title-frames has an invalid size.');
+  titleFrames.forEach((frame, index) =>
+    text(frame, `scoreboard.yml.presentation.bossbar.title-frames[${String(index)}]`),
+  );
+  const playerList = record(presentation['player-list'], 'scoreboard.yml.presentation.player-list');
+  keys(playerList, 'scoreboard.yml.presentation.player-list', [
+    'enabled',
+    'header-frames',
+    'footer-frames',
+  ]);
+  const playerListEnabled = bool(
+    playerList['enabled'],
+    'scoreboard.yml.presentation.player-list.enabled',
+  );
+  for (const field of ['header-frames', 'footer-frames'] as const) {
+    const frames = array(playerList[field], `scoreboard.yml.presentation.player-list.${field}`);
+    if ((playerListEnabled && frames.length === 0) || frames.length > 128)
+      throw new TypeError(`scoreboard.yml.presentation.player-list.${field} has an invalid size.`);
+    frames.forEach((frame, index) =>
+      text(frame, `scoreboard.yml.presentation.player-list.${field}[${String(index)}]`),
+    );
+  }
+  return presentation as unknown as LobbyPresentation;
+}
+
 function validateSpawn(value: Record<string, unknown>): void {
   keys(value, 'spawn.yml.spawn', ['configured'], ['world', 'x', 'y', 'z', 'yaw', 'pitch']);
   const configured = bool(value['configured'], 'spawn.yml.spawn.configured');
@@ -528,10 +633,10 @@ export class LobbyConfigurationStore {
       }
       validateAction(portal['action'], `${label}.action`);
     }
-    const sidebar = record(
-      parsed(contents['scoreboard.yml'], 'scoreboard.yml')['sidebar'],
-      'sidebar',
-    );
+    const scoreboard = parsed(contents['scoreboard.yml'], 'scoreboard.yml');
+    keys(scoreboard, 'scoreboard.yml', ['sidebar'], ['presentation']);
+    const sidebar = record(scoreboard['sidebar'], 'scoreboard.yml.sidebar');
+    const presentation = validatePresentation(scoreboard['presentation']);
     const spawn = record(parsed(contents['spawn.yml'], 'spawn.yml')['spawn'], 'spawn');
     validateSettings(settings);
     validateSidebar(sidebar);
@@ -580,6 +685,7 @@ export class LobbyConfigurationStore {
       items: itemValues,
       menus: menuValues as unknown as readonly LobbyMenu[],
       sidebar: sidebar as unknown as LobbySidebar,
+      presentation,
       servers: serverValues as unknown as readonly LobbyServer[],
       spawn: spawn as unknown as LobbySpawn,
       portals: portalValues.map((portal) => ({

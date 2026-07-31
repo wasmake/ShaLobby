@@ -107,11 +107,11 @@ async function runCommand(
 ): Promise<void> {
   try {
     const response = await operation();
+    await reply(context, response.key, response.values);
     logInfo('command-succeeded', {
       command,
       sender: context.sender.name,
     });
-    await reply(context, response.key, response.values);
   } catch (error: unknown) {
     if (error instanceof CommandInputError) {
       logInfo('command-rejected', {

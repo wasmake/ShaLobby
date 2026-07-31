@@ -1,8 +1,8 @@
 # ShaLobby
 
 ShaLobby is a TypeScript Paper lobby plugin running on ShamooRuntime. Its listeners, inventories,
-scoreboards, player state, portals, visibility, proxy transfers, YAML parsing, and commands are all
-implemented in this repository.
+scoreboards, animated bossbar and player list, player state, portals, visibility, proxy transfers,
+YAML parsing, and commands are all implemented in this repository.
 
 It uses ShamooRuntime's plugin-neutral generated Paper bridge. There is no `shalobby` owner gate,
 `paperManagedLobby` host function, or lobby implementation inside ShamooRuntime.
@@ -45,7 +45,7 @@ reload.
 ## Implementation
 
 - `src/events.ts`: generated Paper event subscriptions and synchronous protection handlers
-- `src/lobby.ts`: player lifecycle, items, menus, scoreboards, portals, visibility, and transfers
+- `src/lobby.ts`: player lifecycle, items, menus, animated presentation, portals, and transfers
 - `src/api.ts`: small typed helpers over `paperJava`
 - `src/configuration.ts`: YAML loading, validation, and persistence
 - `src/commands.ts`: Spanish command surface

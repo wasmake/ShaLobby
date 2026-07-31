@@ -41,6 +41,8 @@ describe('lobby configuration', () => {
     expect(configuration.menus).toHaveLength(4);
     expect(configuration.servers).toHaveLength(6);
     expect(configuration.portals).toHaveLength(3);
+    expect(configuration.presentation.bossbar.enabled).toBe(true);
+    expect(configuration.presentation['player-list'].enabled).toBe(true);
   });
 
   it('rejects cross-file references to unavailable destinations', async () => {
@@ -67,5 +69,26 @@ describe('lobby configuration', () => {
     await expect(new LobbyConfigurationStore().load()).rejects.toThrow(
       'cannot be empty while enabled',
     );
+  });
+
+  it('uses the animated Spanish presentation defaults for an existing scoreboard file', async () => {
+    contents.set(
+      'scoreboard.yml',
+      String(contents.get('scoreboard.yml')).replace(/\npresentation:[\s\S]*$/u, '\n'),
+    );
+
+    const configuration = await new LobbyConfigurationStore().load();
+
+    expect(configuration.presentation.bossbar['title-frames'][0]).toContain('TIENDA');
+    expect(configuration.presentation['player-list']['header-frames'][0]).toContain('Bienvenido');
+  });
+
+  it('rejects an invalid bossbar color', async () => {
+    contents.set(
+      'scoreboard.yml',
+      String(contents.get('scoreboard.yml')).replace('color: PURPLE', 'color: ORANGE'),
+    );
+
+    await expect(new LobbyConfigurationStore().load()).rejects.toThrow('bossbar.color is invalid');
   });
 });

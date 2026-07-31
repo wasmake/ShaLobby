@@ -70,6 +70,11 @@ interface PreparedPresentation {
   readonly titles: Map<string, PaperHandle>;
 }
 
+interface PlayerBossBar {
+  readonly handle: PaperHandle;
+  readonly revision: number;
+}
+
 interface SidebarSession {
   readonly scoreboard: PaperHandle;
   readonly objective: PaperHandle;
@@ -175,8 +180,11 @@ export class ShaLobbyRuntime {
   readonly #pendingActions = new Set<Promise<void>>();
   readonly #inactiveSidebars = new Set<string>();
   readonly #inactiveSidebarPlayers = new Map<string, string>();
+  readonly #inactivePresentations = new Map<string, symbol>();
+  readonly #pendingPlayerListClears = new Set<string>();
   readonly #preparedMenus = new Map<string, PreparedMenu>();
   readonly #preparedTitles = new Map<string, PaperHandle>();
+  readonly #presentationUpdates = new Map<string, Promise<void>>();
   readonly #sidebarSessions = new Map<string, SidebarSession>();
   readonly #sidebarUpdates = new Map<string, Promise<void>>();
   readonly #transferCooldowns = new Map<string, number>();
@@ -184,6 +192,7 @@ export class ShaLobbyRuntime {
   readonly #visualizers = new Set<string>();
   #configuration: LobbyConfiguration | undefined;
   #closed = false;
+  readonly #bossBars = new Map<string, PlayerBossBar>();
   #enforcementActive = false;
   #itemKey: PaperHandle | undefined;
   #mutationQueue: Promise<void> = Promise.resolve();
@@ -191,6 +200,7 @@ export class ShaLobbyRuntime {
   #persistentString: PaperHandle | undefined;
   #reloading = false;
   #revision = 0;
+  #presentationRefreshActive = false;
   #sidebarRefreshActive = false;
   #tasks: PaperHandle[] = [];
 
@@ -270,6 +280,13 @@ export class ShaLobbyRuntime {
       preparedPresentation = undefined;
     } catch (error) {
       const rollbackFailures: unknown[] = [];
+      let tasksStopped = true;
+      try {
+        await this.stopTasks();
+      } catch (rollbackError: unknown) {
+        tasksStopped = false;
+        rollbackFailures.push(rollbackError);
+      }
       if (preparedPresentation !== undefined) {
         try {
           await this.releasePresentation(preparedPresentation);
@@ -330,7 +347,11 @@ export class ShaLobbyRuntime {
           } catch (restartError: unknown) {
             rollbackFailures.push(restartError);
           }
-        for (const operation of [() => this.replayPendingJoins(), () => this.restartTasks()])
+        const restartOperations = [
+          () => this.replayPendingJoins(),
+          ...(tasksStopped ? [() => this.restartTasks()] : []),
+        ];
+        for (const operation of restartOperations)
           try {
             await operation();
           } catch (restartError: unknown) {
@@ -418,6 +439,11 @@ export class ShaLobbyRuntime {
     for (const current of online)
       await attempt(async () => {
         const id = await playerUniqueId(current);
+        try {
+          await this.removePlayerPresentation(current, id, !replacementPresent, true);
+        } catch (error: unknown) {
+          failures.push(error);
+        }
         const sidebar = this.#sidebarSessions.get(id);
         if (sidebar !== undefined) {
           const assigned = await call<PaperHandle>(current, 'getScoreboard');
@@ -453,6 +479,7 @@ export class ShaLobbyRuntime {
       await attempt(() => this.releaseSidebar(session));
     for (const session of this.#menuSessions.values())
       await attempt(() => session.inventory.$release().then(() => undefined));
+    await attempt(() => this.releaseBossBars());
     await attempt(() => this.releasePreparedPresentation());
     if (!replacementPresent)
       await attempt(async () => {
@@ -500,11 +527,15 @@ export class ShaLobbyRuntime {
     this.#pendingActions.clear();
     this.#inactiveSidebars.clear();
     this.#inactiveSidebarPlayers.clear();
+    this.#inactivePresentations.clear();
+    this.#pendingPlayerListClears.clear();
     this.#sidebarSessions.clear();
     this.#sidebarUpdates.clear();
     this.#menuSessions.clear();
     this.#preparedMenus.clear();
     this.#preparedTitles.clear();
+    this.#bossBars.clear();
+    this.#presentationUpdates.clear();
     this.#itemCooldowns.clear();
     this.#initializedPlayers.clear();
     this.#portalCooldowns.clear();
@@ -525,6 +556,8 @@ export class ShaLobbyRuntime {
     if (inactive !== undefined) this.#inactiveSidebars.delete(inactive);
     this.#inactiveSidebarPlayers.delete(id);
     this.#inactiveSidebars.delete(current.$identity);
+    this.#inactivePresentations.delete(id);
+    this.#pendingPlayerListClears.delete(id);
   }
 
   public async join(event: PaperHandle): Promise<void> {
@@ -548,7 +581,19 @@ export class ShaLobbyRuntime {
     const id = await playerUniqueId(current);
     this.activateSidebar(current, id);
     this.#visibility.set(id, this.configuration.settings.visibility.default);
-    const failures = await this.welcomeJoinedPlayer(current);
+    const teleport =
+      this.configuration.settings.join.teleport && this.configuration.spawn.configured
+        ? this.teleportToSpawn(current)
+        : Promise.resolve();
+    const immediate = await Promise.allSettled([
+      teleport,
+      this.welcomeJoinedPlayer(current).then((failures) => {
+        if (failures.length > 0)
+          throw new AggregateError(failures, 'Player welcome feedback was incomplete.');
+      }),
+      this.applyPlayerPresentation(current, undefined, false, id),
+    ]);
+    const failures = rejectionReasons(immediate);
     const initialized = await Promise.allSettled([
       this.updateSidebar(current),
       this.configuration.settings.join.reset ? this.resetPlayer(current) : this.giveItems(current),
@@ -559,8 +604,6 @@ export class ShaLobbyRuntime {
         [...failures, ...initializationFailures],
         'Player presentation initialization failed.',
       );
-    if (this.configuration.settings.join.teleport && this.configuration.spawn.configured)
-      await this.teleportToSpawn(current);
     await this.applyJoinedPlayerVisibility(current);
     const effects = await Promise.allSettled([
       this.executeAction(current, {
@@ -636,6 +679,22 @@ export class ShaLobbyRuntime {
       playerUniqueId(current),
       call<number>(current, 'getEntityId'),
     ]);
+    const presentationToken = Symbol(id);
+    this.#inactivePresentations.set(id, presentationToken);
+    runOutsidePaperFrame(() => {
+      this.startDetached('Player quit presentation cleanup', async () => {
+        try {
+          await this.removePlayerPresentation(current, id, false, true);
+        } catch (error: unknown) {
+          console.error('[ShaLobby] Player quit presentation cleanup failed.', error);
+        } finally {
+          if (this.#inactivePresentations.get(id) === presentationToken) {
+            this.#inactivePresentations.delete(id);
+            this.#pendingPlayerListClears.delete(id);
+          }
+        }
+      });
+    });
     const previouslyInactive = this.#inactiveSidebarPlayers.get(id);
     if (previouslyInactive !== undefined) this.#inactiveSidebars.delete(previouslyInactive);
     this.#inactiveSidebarPlayers.delete(id);
@@ -880,6 +939,7 @@ export class ShaLobbyRuntime {
       this.#visibility.set(id, this.configuration.settings.visibility.default);
       await this.giveItems(current);
       await this.updateSidebar(current);
+      await this.applyPlayerPresentation(current, undefined, false, id);
       for (const viewer of await onlinePlayers()) await this.applyVisibility(viewer);
       return;
     }
@@ -1238,24 +1298,41 @@ export class ShaLobbyRuntime {
 
   private async setSpawn(id: string): Promise<ManagedLobbyResult> {
     const current = await this.requirePlayer(id);
-    const location = await callExact<Ref<'org.bukkit.Location'>>(
-      current,
-      'getLocation',
-      '()Lorg/bukkit/Location;',
-    );
-    const world = await call<Ref<'org.bukkit.World'>>(location, 'getWorld');
-    const spawn = {
-      configured: true,
-      world: await call<string>(world, 'getName'),
-      x: await call<number>(location, 'getX'),
-      y: await call<number>(location, 'getY'),
-      z: await call<number>(location, 'getZ'),
-      yaw: await call<number>(location, 'getYaw'),
-      pitch: await call<number>(location, 'getPitch'),
-    };
-    await this.#store.writeSpawn(spawn);
-    Object.assign(this.configuration.spawn, spawn);
-    return { ok: true, state: 'spawn-set', world: spawn.world, x: spawn.x, y: spawn.y, z: spawn.z };
+    let location: Ref<'org.bukkit.Location'> | undefined;
+    let world: Ref<'org.bukkit.World'> | undefined;
+    try {
+      location = await callExact<Ref<'org.bukkit.Location'>>(
+        current,
+        'getLocation',
+        '()Lorg/bukkit/Location;',
+      );
+      world = await call<Ref<'org.bukkit.World'>>(location, 'getWorld');
+      const [worldName, x, y, z, yaw, pitch] = await Promise.all([
+        call<string>(world, 'getName'),
+        call<number>(location, 'getX'),
+        call<number>(location, 'getY'),
+        call<number>(location, 'getZ'),
+        call<number>(location, 'getYaw'),
+        call<number>(location, 'getPitch'),
+      ]);
+      const spawn = { configured: true, world: worldName, x, y, z, yaw, pitch };
+      await this.#store.writeSpawn(spawn);
+      Object.assign(this.configuration.spawn, spawn);
+      return {
+        ok: true,
+        state: 'spawn-set',
+        world: spawn.world,
+        x: spawn.x,
+        y: spawn.y,
+        z: spawn.z,
+      };
+    } finally {
+      await Promise.allSettled([
+        current.$release(),
+        ...(location === undefined ? [] : [location.$release()]),
+        ...(world === undefined ? [] : [world.$release()]),
+      ]);
+    }
   }
 
   private async requirePlayer(id: string): Promise<Ref<'org.bukkit.entity.Player'>> {
@@ -1477,6 +1554,11 @@ export class ShaLobbyRuntime {
     this.#inactiveSidebarPlayers.set(id, sidebarKey);
     this.#inactiveSidebars.add(sidebarKey);
     await this.#sidebarUpdates.get(sidebarKey)?.catch(() => undefined);
+    try {
+      await this.removePlayerPresentation(current, id);
+    } catch (error: unknown) {
+      console.error('[ShaLobby] Player world-exit presentation cleanup failed.', error);
+    }
     await this.removeManagedItems(current);
     const menu = this.#menuSessions.get(id);
     if (menu !== undefined) {
@@ -1640,6 +1722,30 @@ export class ShaLobbyRuntime {
     }
   }
 
+  private async createBossBar(onlineCount: number): Promise<PaperHandle> {
+    const settings = this.configuration.presentation.bossbar;
+    const title = await component(
+      message(this.presentationFrame(settings['title-frames']), { online: onlineCount }),
+    );
+    try {
+      const [color, overlay] = await Promise.all([
+        constant('net.kyori.adventure.bossbar.BossBar$Color', settings.color),
+        constant('net.kyori.adventure.bossbar.BossBar$Overlay', settings.overlay),
+      ]);
+      return await staticExact<PaperHandle>(
+        paperJava.resolve(JAVA_TYPES['net.kyori.adventure.bossbar.BossBar']),
+        'bossBar',
+        '(Lnet/kyori/adventure/text/Component;FLnet/kyori/adventure/bossbar/BossBar$Color;Lnet/kyori/adventure/bossbar/BossBar$Overlay;)Lnet/kyori/adventure/bossbar/BossBar;',
+        title,
+        settings.progress,
+        color,
+        overlay,
+      );
+    } finally {
+      await title.$release();
+    }
+  }
+
   private async preparePresentation(): Promise<PreparedPresentation> {
     const actions = [
       ...this.configuration.items.map((item) => item.action),
@@ -1682,6 +1788,44 @@ export class ShaLobbyRuntime {
     for (const [id, menu] of prepared.menus) this.#preparedMenus.set(id, menu);
     for (const [id, title] of prepared.titles) this.#preparedTitles.set(id, title);
     try {
+      const online = await onlinePlayers();
+      const resolved = await Promise.allSettled(
+        online.map(async (current) => ({
+          current,
+          id: await playerUniqueId(current),
+          managed: await this.isManagedPlayer(current),
+        })),
+      );
+      const updated: Promise<unknown>[] = [];
+      for (const result of resolved)
+        if (result.status === 'fulfilled')
+          updated.push(this.removePlayerPresentation(result.value.current, result.value.id, true));
+      const removed = await Promise.allSettled(updated);
+      const applied = await Promise.allSettled(
+        resolved.flatMap((result) =>
+          result.status === 'fulfilled' && result.value.managed
+            ? [
+                this.applyPlayerPresentation(
+                  result.value.current,
+                  online.length,
+                  true,
+                  result.value.id,
+                ),
+              ]
+            : [],
+        ),
+      );
+      const failures = [
+        ...rejectionReasons(resolved),
+        ...rejectionReasons(removed),
+        ...rejectionReasons(applied),
+      ];
+      if (failures.length > 0)
+        console.error('[ShaLobby] Prepared player presentation was incomplete.', failures);
+    } catch (error: unknown) {
+      console.error('[ShaLobby] Prepared player presentation could not be installed.', error);
+    }
+    try {
       await this.releasePresentation(previous);
     } catch (error: unknown) {
       console.error('[ShaLobby] Previous prepared presentation cleanup failed.', error);
@@ -1708,6 +1852,261 @@ export class ShaLobbyRuntime {
     this.#preparedMenus.clear();
     this.#preparedTitles.clear();
     await this.releasePresentation(prepared);
+  }
+
+  private async releaseBossBars(): Promise<void> {
+    const bossBars = [...this.#bossBars.values()];
+    this.#bossBars.clear();
+    const released = await Promise.allSettled(bossBars.map((bossBar) => bossBar.handle.$release()));
+    const failures = rejectionReasons(released);
+    if (failures.length > 0)
+      throw new AggregateError(failures, 'Player bossbars could not be released.');
+  }
+
+  private presentationFrame(frames: readonly string[]): string {
+    const interval = this.configuration.presentation['interval-ticks'] * 50;
+    const index = Math.floor(Date.now() / interval) % frames.length;
+    return frames[index] ?? '';
+  }
+
+  private setBossBarVisibility(
+    current: Ref<'org.bukkit.entity.Player'>,
+    bossBar: PaperHandle,
+    visible: boolean,
+  ): Promise<void> {
+    return paperJava.invoke(
+      current,
+      JAVA_TYPES['net.kyori.adventure.audience.Audience'],
+      visible ? 'showBossBar' : 'hideBossBar',
+      '(Lnet/kyori/adventure/bossbar/BossBar;)V',
+      bossBar,
+    );
+  }
+
+  private async serializePlayerPresentation(
+    id: string,
+    action: () => Promise<void>,
+  ): Promise<void> {
+    const previous = this.#presentationUpdates.get(id) ?? Promise.resolve();
+    const update = previous.catch(() => undefined).then(action);
+    this.#presentationUpdates.set(id, update);
+    try {
+      await update;
+    } finally {
+      if (this.#presentationUpdates.get(id) === update) this.#presentationUpdates.delete(id);
+    }
+  }
+
+  private async applyPlayerPresentation(
+    current: Ref<'org.bukkit.entity.Player'>,
+    onlineCount?: number,
+    clearDisabledPlayerList = false,
+    knownId?: string,
+  ): Promise<void> {
+    const id = knownId ?? (await playerUniqueId(current));
+    if (this.#inactivePresentations.has(id)) return;
+    await this.serializePlayerPresentation(id, () =>
+      this.#inactivePresentations.has(id)
+        ? Promise.resolve()
+        : this.applyPlayerPresentationNow(current, id, onlineCount, clearDisabledPlayerList),
+    );
+  }
+
+  private async applyPlayerPresentationNow(
+    current: Ref<'org.bukkit.entity.Player'>,
+    id: string,
+    onlineCount?: number,
+    clearDisabledPlayerList = false,
+  ): Promise<void> {
+    const resolvedOnlineCount = onlineCount ?? (await onlinePlayers()).length;
+    let ownedBossBar = this.#bossBars.get(id);
+    if (ownedBossBar !== undefined && ownedBossBar.revision !== this.#revision) {
+      await this.removePlayerPresentationNow(current, id, false);
+      ownedBossBar = undefined;
+    }
+    if (this.configuration.presentation.bossbar.enabled) {
+      if (ownedBossBar === undefined) {
+        ownedBossBar = {
+          handle: await this.createBossBar(resolvedOnlineCount),
+          revision: this.#revision,
+        };
+        this.#bossBars.set(id, ownedBossBar);
+      }
+      try {
+        await this.setBossBarVisibility(current, ownedBossBar.handle, true);
+      } catch (error: unknown) {
+        if (this.#bossBars.get(id) === ownedBossBar) this.#bossBars.delete(id);
+        await ownedBossBar.handle.$release();
+        throw error;
+      }
+    } else if (ownedBossBar !== undefined)
+      await this.removePlayerPresentationNow(current, id, false);
+    const settings = this.configuration.presentation['player-list'];
+    if (!settings.enabled) {
+      if (clearDisabledPlayerList)
+        try {
+          await this.sendPlayerList(current, '', '');
+          this.#pendingPlayerListClears.delete(id);
+        } catch (error: unknown) {
+          this.#pendingPlayerListClears.add(id);
+          throw error;
+        }
+      return;
+    }
+    const replacements = {
+      player: await callExact<string>(current, 'getName', '()Ljava/lang/String;'),
+      online: resolvedOnlineCount,
+    };
+    await this.sendPlayerList(
+      current,
+      message(this.presentationFrame(settings['header-frames']), replacements),
+      message(this.presentationFrame(settings['footer-frames']), replacements),
+    );
+    this.#pendingPlayerListClears.delete(id);
+  }
+
+  private async sendPlayerList(
+    current: Ref<'org.bukkit.entity.Player'>,
+    header: string,
+    footer: string,
+  ): Promise<void> {
+    const rendered = await Promise.allSettled([component(header), component(footer)]);
+    const renderingFailures = rejectionReasons(rendered);
+    if (renderingFailures.length > 0) {
+      const released = await Promise.allSettled(
+        rendered.flatMap((result) =>
+          result.status === 'fulfilled' ? [result.value.$release()] : [],
+        ),
+      );
+      throw new AggregateError(
+        [...renderingFailures, ...rejectionReasons(released)],
+        'Player-list presentation could not be rendered.',
+      );
+    }
+    const [headerResult, footerResult] = rendered;
+    if (headerResult.status !== 'fulfilled' || footerResult.status !== 'fulfilled')
+      throw new Error('Player-list presentation has incomplete content.');
+    try {
+      await paperJava.invoke(
+        current,
+        JAVA_TYPES['net.kyori.adventure.audience.Audience'],
+        'sendPlayerListHeaderAndFooter',
+        '(Lnet/kyori/adventure/text/Component;Lnet/kyori/adventure/text/Component;)V',
+        headerResult.value,
+        footerResult.value,
+      );
+    } finally {
+      await Promise.allSettled([headerResult.value.$release(), footerResult.value.$release()]);
+    }
+  }
+
+  private async removePlayerPresentation(
+    current: Ref<'org.bukkit.entity.Player'>,
+    id: string,
+    clearPlayerList = true,
+    forceRelease = false,
+  ): Promise<void> {
+    await this.serializePlayerPresentation(id, () =>
+      this.removePlayerPresentationNow(current, id, clearPlayerList, forceRelease),
+    );
+  }
+
+  private async removePlayerPresentationNow(
+    current: Ref<'org.bukkit.entity.Player'>,
+    id: string,
+    clearPlayerList: boolean,
+    forceRelease = false,
+  ): Promise<void> {
+    const ownedBossBar = this.#bossBars.get(id);
+    const failures: unknown[] = [];
+    let releaseBossBar = forceRelease;
+    if (ownedBossBar !== undefined)
+      try {
+        await this.setBossBarVisibility(current, ownedBossBar.handle, false);
+        releaseBossBar = true;
+      } catch (error: unknown) {
+        failures.push(error);
+      }
+    if (ownedBossBar !== undefined && releaseBossBar) {
+      if (this.#bossBars.get(id) === ownedBossBar) this.#bossBars.delete(id);
+      try {
+        await ownedBossBar.handle.$release();
+      } catch (error: unknown) {
+        failures.push(error);
+      }
+    }
+    if (clearPlayerList)
+      try {
+        await this.sendPlayerList(current, '', '');
+        this.#pendingPlayerListClears.delete(id);
+      } catch (error: unknown) {
+        this.#pendingPlayerListClears.add(id);
+        failures.push(error);
+      }
+    if (failures.length > 0)
+      throw new AggregateError(failures, 'Player presentation could not be cleared.');
+  }
+
+  private async refreshPresentation(): Promise<void> {
+    if (this.#closed) return;
+    if (
+      !this.configuration.presentation.bossbar.enabled &&
+      !this.configuration.presentation['player-list'].enabled &&
+      this.#bossBars.size === 0 &&
+      this.#pendingPlayerListClears.size === 0
+    )
+      return;
+    const online = await onlinePlayers();
+    const refreshed = await Promise.allSettled(
+      online.map(async (current) => {
+        const id = await playerUniqueId(current);
+        if (await this.isManagedPlayer(current))
+          await this.applyPlayerPresentation(
+            current,
+            online.length,
+            this.#pendingPlayerListClears.has(id),
+            id,
+          );
+        else
+          await this.removePlayerPresentation(current, id, this.#pendingPlayerListClears.has(id));
+      }),
+    );
+    if (this.configuration.presentation.bossbar.enabled && this.#bossBars.size > 0) {
+      const title = await component(
+        message(this.presentationFrame(this.configuration.presentation.bossbar['title-frames']), {
+          online: online.length,
+        }),
+      );
+      try {
+        const updated = await Promise.allSettled(
+          [...this.#bossBars].map(([id, ownedBossBar]) =>
+            this.serializePlayerPresentation(id, async () => {
+              if (
+                this.#bossBars.get(id) !== ownedBossBar ||
+                ownedBossBar.revision !== this.#revision ||
+                this.#inactivePresentations.has(id)
+              )
+                return;
+              await paperJava.invoke(
+                ownedBossBar.handle,
+                JAVA_TYPES['net.kyori.adventure.bossbar.BossBar'],
+                'name',
+                '(Lnet/kyori/adventure/text/Component;)Lnet/kyori/adventure/bossbar/BossBar;',
+                title,
+              );
+            }),
+          ),
+        );
+        const failures = rejectionReasons(updated);
+        if (failures.length > 0)
+          throw new AggregateError(failures, 'Bossbar animation refresh was incomplete.');
+      } finally {
+        await title.$release();
+      }
+    }
+    const failures = rejectionReasons(refreshed);
+    if (failures.length > 0)
+      throw new AggregateError(failures, 'Animated player presentation refresh was incomplete.');
   }
 
   private async executeAction(
@@ -1847,15 +2246,24 @@ export class ShaLobbyRuntime {
 
   private async stopTasks(): Promise<void> {
     const tasks = this.#tasks.splice(0);
+    const failedTasks: PaperHandle[] = [];
     const results = await Promise.allSettled(
       tasks.map(async (task) => {
         try {
           await call(task, 'cancel');
-        } finally {
+        } catch (error: unknown) {
+          failedTasks.push(task);
+          throw error;
+        }
+        try {
           await task.$release();
+        } catch (error: unknown) {
+          failedTasks.push(task);
+          throw error;
         }
       }),
     );
+    this.#tasks.push(...failedTasks);
     const failures: unknown[] = [];
     for (const result of results) if (result.status === 'rejected') failures.push(result.reason);
     if (failures.length > 0) throw new AggregateError(failures, 'Unable to stop lobby tasks.');
@@ -2235,6 +2643,9 @@ export class ShaLobbyRuntime {
       ]),
       ...candidate.sidebar['title-frames'],
       ...candidate.sidebar.lines,
+      ...candidate.presentation.bossbar['title-frames'],
+      ...candidate.presentation['player-list']['header-frames'],
+      ...candidate.presentation['player-list']['footer-frames'],
       ...candidate.servers.map((server) => server['display-name']),
     ];
     for (const value of texts) await (await component(value)).$release();
@@ -2248,6 +2659,13 @@ export class ShaLobbyRuntime {
       'BLAZE_ROD',
     ]);
     for (const material of materials) await constant('org.bukkit.Material', material);
+    await Promise.all([
+      constant('net.kyori.adventure.bossbar.BossBar$Color', candidate.presentation.bossbar.color),
+      constant(
+        'net.kyori.adventure.bossbar.BossBar$Overlay',
+        candidate.presentation.bossbar.overlay,
+      ),
+    ]);
     for (const matched of candidate.messagesContent.matchAll(/^ {4}sound: ([A-Z0-9_]+)$/gmu))
       await (await constant('org.bukkit.Sound', matched[1] ?? '')).$release();
     for (const matched of candidate.messagesContent.matchAll(/^ {4}particle: ([A-Z0-9_]+)$/gmu))
@@ -2287,56 +2705,130 @@ export class ShaLobbyRuntime {
       'getGlobalRegionScheduler',
       '()Lio/papermc/paper/threadedregions/scheduler/GlobalRegionScheduler;',
     );
-    const sidebarTask = await callExact<PaperHandle>(
-      scheduler,
-      'runAtFixedRate',
-      '(Lorg/bukkit/plugin/Plugin;Ljava/util/function/Consumer;JJ)Lio/papermc/paper/threadedregions/scheduler/ScheduledTask;',
-      plugin,
-      () => {
-        runOutsidePaperFrame(() => {
-          if (this.#closed || this.#reloading || this.#sidebarRefreshActive) return;
-          this.#sidebarRefreshActive = true;
-          this.startDetached(
-            'Sidebar refresh',
-            () => this.refreshSidebars(),
-            () => {
-              this.#sidebarRefreshActive = false;
-            },
-          );
-        });
-      },
-      1,
-      Math.max(1, this.configuration.sidebar['interval-ticks']),
-    );
-    let enforcementTask: PaperHandle;
+    const tasks: PaperHandle[] = [];
+    const revision = this.#revision;
     try {
-      enforcementTask = await callExact<PaperHandle>(
-        scheduler,
-        'runAtFixedRate',
-        '(Lorg/bukkit/plugin/Plugin;Ljava/util/function/Consumer;JJ)Lio/papermc/paper/threadedregions/scheduler/ScheduledTask;',
-        plugin,
-        () => {
-          runOutsidePaperFrame(() => {
-            if (this.#closed || this.#reloading || this.#enforcementActive) return;
-            this.#enforcementActive = true;
-            this.startDetached(
-              'Policy enforcement',
-              () => this.enforceLobby(),
-              () => {
-                this.#enforcementActive = false;
-              },
-            );
-          });
-        },
-        1,
-        Math.max(1, this.configuration.settings['enforcement-ticks']),
-      );
+      try {
+        tasks.push(
+          await callExact<PaperHandle>(
+            scheduler,
+            'runAtFixedRate',
+            '(Lorg/bukkit/plugin/Plugin;Ljava/util/function/Consumer;JJ)Lio/papermc/paper/threadedregions/scheduler/ScheduledTask;',
+            plugin,
+            () => {
+              runOutsidePaperFrame(() => {
+                if (
+                  this.#closed ||
+                  this.#reloading ||
+                  revision !== this.#revision ||
+                  this.#sidebarRefreshActive
+                )
+                  return;
+                this.#sidebarRefreshActive = true;
+                this.startDetached(
+                  'Sidebar refresh',
+                  () => this.refreshSidebars(),
+                  () => {
+                    this.#sidebarRefreshActive = false;
+                  },
+                );
+              });
+            },
+            1,
+            Math.max(1, this.configuration.sidebar['interval-ticks']),
+          ),
+        );
+        tasks.push(
+          await callExact<PaperHandle>(
+            scheduler,
+            'runAtFixedRate',
+            '(Lorg/bukkit/plugin/Plugin;Ljava/util/function/Consumer;JJ)Lio/papermc/paper/threadedregions/scheduler/ScheduledTask;',
+            plugin,
+            () => {
+              runOutsidePaperFrame(() => {
+                if (
+                  this.#closed ||
+                  this.#reloading ||
+                  revision !== this.#revision ||
+                  this.#enforcementActive
+                )
+                  return;
+                this.#enforcementActive = true;
+                this.startDetached(
+                  'Policy enforcement',
+                  () => this.enforceLobby(),
+                  () => {
+                    this.#enforcementActive = false;
+                  },
+                );
+              });
+            },
+            1,
+            Math.max(1, this.configuration.settings['enforcement-ticks']),
+          ),
+        );
+        tasks.push(
+          await callExact<PaperHandle>(
+            scheduler,
+            'runAtFixedRate',
+            '(Lorg/bukkit/plugin/Plugin;Ljava/util/function/Consumer;JJ)Lio/papermc/paper/threadedregions/scheduler/ScheduledTask;',
+            plugin,
+            () => {
+              runOutsidePaperFrame(() => {
+                if (
+                  this.#closed ||
+                  this.#reloading ||
+                  revision !== this.#revision ||
+                  this.#presentationRefreshActive
+                )
+                  return;
+                this.#presentationRefreshActive = true;
+                this.startDetached(
+                  'Animated presentation refresh',
+                  () => this.refreshPresentation(),
+                  () => {
+                    this.#presentationRefreshActive = false;
+                  },
+                );
+              });
+            },
+            1,
+            Math.max(1, this.configuration.presentation['interval-ticks']),
+          ),
+        );
+      } finally {
+        await scheduler.$release();
+      }
     } catch (error) {
-      await call(sidebarTask, 'cancel');
-      await sidebarTask.$release();
+      const failedTasks: PaperHandle[] = [];
+      const stopped = await Promise.allSettled(
+        tasks.map(async (task) => {
+          try {
+            await call(task, 'cancel');
+          } catch (cancelError: unknown) {
+            failedTasks.push(task);
+            throw cancelError;
+          }
+          try {
+            await task.$release();
+          } catch (releaseError: unknown) {
+            failedTasks.push(task);
+            throw releaseError;
+          }
+        }),
+      );
+      const cleanupFailures = rejectionReasons(stopped);
+      if (cleanupFailures.length > 0) {
+        this.#tasks = failedTasks;
+        throw new AggregateError(
+          [error, ...cleanupFailures],
+          'Lobby task startup and cleanup failed.',
+          { cause: error },
+        );
+      }
       throw error;
     }
-    this.#tasks = [sidebarTask, enforcementTask];
+    this.#tasks = tasks;
   }
 
   private async refreshSidebars(): Promise<void> {

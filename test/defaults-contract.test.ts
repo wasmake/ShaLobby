@@ -303,13 +303,13 @@ describe('managed lobby defaults contract', () => {
 
   it('ships an exact 15-line sidebar using only all supported Runtime placeholders', async () => {
     const scoreboard = (await readDefaults())['scoreboard.yml'];
-    expect(Object.keys(scoreboard)).toEqual(['sidebar']);
+    expect(Object.keys(scoreboard)).toEqual(['sidebar', 'presentation']);
     const sidebar = mapping(scoreboard['sidebar'], 'scoreboard.yml.sidebar');
     expect(Object.keys(sidebar).sort()).toEqual(
       ['enabled', 'interval-ticks', 'lines', 'title-frames'].sort(),
     );
     expect(sidebar['enabled']).toBe(true);
-    expect(sidebar['interval-ticks']).toBe(20);
+    expect(sidebar['interval-ticks']).toBe(10);
     const frames = sequence(sidebar['title-frames'], 'scoreboard.yml.sidebar.title-frames').map(
       (value, index) => text(value, `scoreboard.yml.sidebar.title-frames[${String(index)}]`),
     );
@@ -323,6 +323,35 @@ describe('managed lobby defaults contract', () => {
     expect(frames).toHaveLength(4);
     expect(lines).toHaveLength(15);
     expect([...placeholders].sort()).toEqual([...SCOREBOARD_PLACEHOLDERS].sort());
+
+    const presentation = mapping(scoreboard['presentation'], 'scoreboard.yml.presentation');
+    expect(presentation['interval-ticks']).toBe(20);
+    const bossbar = mapping(presentation['bossbar'], 'scoreboard.yml.presentation.bossbar');
+    expect(bossbar['enabled']).toBe(true);
+    expect(bossbar['color']).toBe('PURPLE');
+    expect(bossbar['overlay']).toBe('PROGRESS');
+    expect(
+      sequence(bossbar['title-frames'], 'scoreboard.yml.presentation.bossbar.title-frames').join(
+        '\n',
+      ),
+    ).toContain('TIENDA');
+    const playerList = mapping(
+      presentation['player-list'],
+      'scoreboard.yml.presentation.player-list',
+    );
+    expect(playerList['enabled']).toBe(true);
+    expect(
+      sequence(
+        playerList['header-frames'],
+        'scoreboard.yml.presentation.player-list.header-frames',
+      ).join('\n'),
+    ).toContain('Bienvenido');
+    expect(
+      sequence(
+        playerList['footer-frames'],
+        'scoreboard.yml.presentation.player-list.footer-frames',
+      ).join('\n'),
+    ).toContain('Jugadores en línea');
   });
 
   it.skipIf(RUNTIME_DEFAULTS === undefined)(
