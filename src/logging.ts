@@ -26,6 +26,16 @@ export function logInfo(event: string, fields: LogFields = {}): void {
   console.info(record(event, fields));
 }
 
+export function logStartupComplete(durationMs: number): void {
+  const cyan = '\u001B[96m';
+  const green = '\u001B[92m';
+  const yellow = '\u001B[93m';
+  const reset = '\u001B[0m';
+  console.info(
+    `${cyan}[ShaLobby]${reset} ${green}Finished loading successfully${reset} ${yellow}in ${durationMs.toFixed(2)} ms.${reset}`,
+  );
+}
+
 export function logError(event: string, error: unknown, fields: LogFields = {}): void {
   console.error(record(event, { ...fields, ...errorFields(error) }));
 }
