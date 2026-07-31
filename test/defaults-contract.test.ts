@@ -325,33 +325,30 @@ describe('managed lobby defaults contract', () => {
     expect([...placeholders].sort()).toEqual([...SCOREBOARD_PLACEHOLDERS].sort());
 
     const presentation = mapping(scoreboard['presentation'], 'scoreboard.yml.presentation');
-    expect(presentation['interval-ticks']).toBe(20);
     const bossbar = mapping(presentation['bossbar'], 'scoreboard.yml.presentation.bossbar');
     expect(bossbar['enabled']).toBe(true);
     expect(bossbar['color']).toBe('PURPLE');
     expect(bossbar['overlay']).toBe('PROGRESS');
-    expect(
-      sequence(bossbar['title-frames'], 'scoreboard.yml.presentation.bossbar.title-frames').join(
-        '\n',
-      ),
-    ).toContain('TIENDA');
+    expect(bossbar['frame-ticks']).toBe(2);
+    expect(bossbar['last-frame-ticks']).toBe(60);
+    const bossbarFrames = sequence(
+      bossbar['title-frames'],
+      'scoreboard.yml.presentation.bossbar.title-frames',
+    );
+    expect(bossbarFrames).toHaveLength(15);
+    expect(bossbarFrames[0]).toContain('>T<');
+    expect(bossbarFrames.at(-1)).toContain('TIENDA SHALOBBY');
     const playerList = mapping(
       presentation['player-list'],
       'scoreboard.yml.presentation.player-list',
     );
     expect(playerList['enabled']).toBe(true);
-    expect(
-      sequence(
-        playerList['header-frames'],
-        'scoreboard.yml.presentation.player-list.header-frames',
-      ).join('\n'),
-    ).toContain('Bienvenido');
-    expect(
-      sequence(
-        playerList['footer-frames'],
-        'scoreboard.yml.presentation.player-list.footer-frames',
-      ).join('\n'),
-    ).toContain('Jugadores en línea');
+    expect(text(playerList['header'], 'scoreboard.yml.presentation.player-list.header')).toContain(
+      'Bienvenido',
+    );
+    expect(text(playerList['footer'], 'scoreboard.yml.presentation.player-list.footer')).toContain(
+      'Jugadores en línea',
+    );
   });
 
   it.skipIf(RUNTIME_DEFAULTS === undefined)(

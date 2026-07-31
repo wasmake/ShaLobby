@@ -84,18 +84,19 @@ export interface LobbySidebar {
 }
 
 export interface LobbyPresentation {
-  readonly 'interval-ticks': number;
   readonly bossbar: {
     readonly enabled: boolean;
     readonly color: 'BLUE' | 'GREEN' | 'PINK' | 'PURPLE' | 'RED' | 'WHITE' | 'YELLOW';
     readonly overlay: 'PROGRESS' | 'NOTCHED_6' | 'NOTCHED_10' | 'NOTCHED_12' | 'NOTCHED_20';
     readonly progress: number;
+    readonly 'frame-ticks': number;
+    readonly 'last-frame-ticks': number;
     readonly 'title-frames': readonly string[];
   };
   readonly 'player-list': {
     readonly enabled: boolean;
-    readonly 'header-frames': readonly string[];
-    readonly 'footer-frames': readonly string[];
+    readonly header: string;
+    readonly footer: string;
   };
 }
 
@@ -371,49 +372,60 @@ function validateSidebar(value: Record<string, unknown>): void {
 }
 
 const DEFAULT_PRESENTATION: LobbyPresentation = {
-  'interval-ticks': 20,
   bossbar: {
     enabled: true,
     color: 'PURPLE',
     overlay: 'PROGRESS',
     progress: 1,
+    'frame-ticks': 2,
+    'last-frame-ticks': 60,
     'title-frames': [
-      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOBBY</bold></gradient> <#F8FAFC>Rangos, cosméticos y más</#F8FAFC>',
-      '<#FFB347><bold>OFERTAS EXCLUSIVAS</bold></#FFB347> <#F8FAFC>Visita nuestra tienda</#F8FAFC>',
-      '<#55FF88><bold>APOYA AL SERVIDOR</bold></#55FF88> <#F8FAFC>Descubre ventajas increíbles</#F8FAFC>',
+      '<gradient:#38D9FF:#A855F7><bold>T</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TI</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TIE</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TIEN</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TIEND</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TIENDA</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TIENDA S</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TIENDA SH</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHA</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHAL</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALO</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOB</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOBB</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOBBY</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOBBY</bold></gradient> <#F8FAFC>• Rangos, cosméticos y más</#F8FAFC>',
     ],
   },
   'player-list': {
     enabled: true,
-    'header-frames': [
+    header:
       '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>\n<#A8B3C7>Bienvenido, <#F8FAFC>%player%</#F8FAFC></#A8B3C7>',
-      '<gradient:#A855F7:#4F7CFF:#38D9FF><bold>◆ SHALOBBY ◆</bold></gradient>\n<#A8B3C7>Elige tu próxima aventura</#A8B3C7>',
-    ],
-    'footer-frames': [
+    footer:
       '<#A8B3C7>Jugadores en línea: <#F8FAFC>%online%</#F8FAFC></#A8B3C7>\n<#55FF88>¡Que disfrutes tu estancia!</#55FF88>',
-      '<#FFB347>Visita la tienda y descubre nuestras ofertas</#FFB347>\n<#A8B3C7>Gracias por jugar en ShaLobby</#A8B3C7>',
-    ],
   },
 };
 
 function validatePresentation(value: unknown): LobbyPresentation {
   if (value === undefined) return DEFAULT_PRESENTATION;
   const presentation = record(value, 'scoreboard.yml.presentation');
-  keys(presentation, 'scoreboard.yml.presentation', ['interval-ticks', 'bossbar', 'player-list']);
-  integer(
-    presentation['interval-ticks'],
-    'scoreboard.yml.presentation.interval-ticks',
-    1,
-    1_728_000,
-  );
+  keys(presentation, 'scoreboard.yml.presentation', ['bossbar', 'player-list'], ['interval-ticks']);
+  const legacyInterval =
+    presentation['interval-ticks'] === undefined
+      ? 2
+      : integer(
+          presentation['interval-ticks'],
+          'scoreboard.yml.presentation.interval-ticks',
+          1,
+          1_728_000,
+        );
   const bossbar = record(presentation['bossbar'], 'scoreboard.yml.presentation.bossbar');
-  keys(bossbar, 'scoreboard.yml.presentation.bossbar', [
-    'enabled',
-    'color',
-    'overlay',
-    'progress',
-    'title-frames',
-  ]);
+  keys(
+    bossbar,
+    'scoreboard.yml.presentation.bossbar',
+    ['enabled', 'color', 'overlay', 'progress', 'title-frames'],
+    ['frame-ticks', 'last-frame-ticks'],
+  );
   const bossbarEnabled = bool(bossbar['enabled'], 'scoreboard.yml.presentation.bossbar.enabled');
   if (
     !['BLUE', 'GREEN', 'PINK', 'PURPLE', 'RED', 'WHITE', 'YELLOW'].includes(
@@ -428,6 +440,22 @@ function validatePresentation(value: unknown): LobbyPresentation {
   )
     throw new TypeError('scoreboard.yml.presentation.bossbar.overlay is invalid.');
   finite(bossbar['progress'], 'scoreboard.yml.presentation.bossbar.progress', 0, 1);
+  const frameTicks = integer(
+    bossbar['frame-ticks'] ?? Math.min(legacyInterval, 1_727_999),
+    'scoreboard.yml.presentation.bossbar.frame-ticks',
+    1,
+    1_727_999,
+  );
+  const lastFrameTicks = integer(
+    bossbar['last-frame-ticks'] ?? Math.min(1_728_000, Math.max(legacyInterval + 1, 60)),
+    'scoreboard.yml.presentation.bossbar.last-frame-ticks',
+    1,
+    1_728_000,
+  );
+  if (lastFrameTicks <= frameTicks)
+    throw new TypeError(
+      'scoreboard.yml.presentation.bossbar.last-frame-ticks must exceed frame-ticks.',
+    );
   const titleFrames = array(
     bossbar['title-frames'],
     'scoreboard.yml.presentation.bossbar.title-frames',
@@ -438,24 +466,49 @@ function validatePresentation(value: unknown): LobbyPresentation {
     text(frame, `scoreboard.yml.presentation.bossbar.title-frames[${String(index)}]`),
   );
   const playerList = record(presentation['player-list'], 'scoreboard.yml.presentation.player-list');
-  keys(playerList, 'scoreboard.yml.presentation.player-list', [
-    'enabled',
-    'header-frames',
-    'footer-frames',
-  ]);
+  keys(
+    playerList,
+    'scoreboard.yml.presentation.player-list',
+    ['enabled'],
+    ['header', 'footer', 'header-frames', 'footer-frames'],
+  );
   const playerListEnabled = bool(
     playerList['enabled'],
     'scoreboard.yml.presentation.player-list.enabled',
   );
-  for (const field of ['header-frames', 'footer-frames'] as const) {
-    const frames = array(playerList[field], `scoreboard.yml.presentation.player-list.${field}`);
-    if ((playerListEnabled && frames.length === 0) || frames.length > 128)
-      throw new TypeError(`scoreboard.yml.presentation.player-list.${field} has an invalid size.`);
-    frames.forEach((frame, index) =>
-      text(frame, `scoreboard.yml.presentation.player-list.${field}[${String(index)}]`),
+  const normalizedText = (field: 'footer' | 'header'): string => {
+    const legacyField = `${field}-frames` as const;
+    if (playerList[field] !== undefined)
+      return text(playerList[field], `scoreboard.yml.presentation.player-list.${field}`);
+    const legacyFrames = array(
+      playerList[legacyField],
+      `scoreboard.yml.presentation.player-list.${legacyField}`,
     );
-  }
-  return presentation as unknown as LobbyPresentation;
+    if ((playerListEnabled && legacyFrames.length === 0) || legacyFrames.length > 128)
+      throw new TypeError(
+        `scoreboard.yml.presentation.player-list.${legacyField} has an invalid size.`,
+      );
+    const first = legacyFrames[0];
+    return first === undefined
+      ? ''
+      : text(first, `scoreboard.yml.presentation.player-list.${legacyField}[0]`);
+  };
+  return {
+    bossbar: {
+      enabled: bossbarEnabled,
+      color: String(bossbar['color']) as LobbyPresentation['bossbar']['color'],
+      overlay: String(bossbar['overlay']) as LobbyPresentation['bossbar']['overlay'],
+      progress: Number(bossbar['progress']),
+      'frame-ticks': frameTicks,
+      'last-frame-ticks': lastFrameTicks,
+      'title-frames': titleFrames as readonly string[],
+    },
+    'player-list': {
+      enabled: playerListEnabled,
+      header: normalizedText('header'),
+      footer: normalizedText('footer'),
+    },
+  };
 }
 
 function validateSpawn(value: Record<string, unknown>): void {

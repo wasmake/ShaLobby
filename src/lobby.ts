@@ -103,6 +103,7 @@ interface MovementSnapshot {
 const ITEM_KEY = 'managed_item';
 const WAND_ID = 'portal-wand';
 const DISPLAY_SLOT = 'SIDEBAR';
+const PRESENTATION_MAINTENANCE_TICKS = 20;
 
 function generationId(): string {
   const value = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replaceAll(/[xy]/gu, (token) => {
@@ -198,6 +199,11 @@ export class ShaLobbyRuntime {
   #mutationQueue: Promise<void> = Promise.resolve();
   #pendingMutations = 0;
   #persistentString: PaperHandle | undefined;
+  #presentationAnimationTick = 0;
+  #presentationFrameIndex = -1;
+  #presentationMaintenanceTick = -1;
+  #presentationOnlineCount = -1;
+  #presentationRefreshTick: number | undefined;
   #reloading = false;
   #revision = 0;
   #presentationRefreshActive = false;
@@ -536,6 +542,11 @@ export class ShaLobbyRuntime {
     this.#preparedTitles.clear();
     this.#bossBars.clear();
     this.#presentationUpdates.clear();
+    this.#presentationAnimationTick = 0;
+    this.#presentationFrameIndex = -1;
+    this.#presentationMaintenanceTick = -1;
+    this.#presentationOnlineCount = -1;
+    this.#presentationRefreshTick = undefined;
     this.#itemCooldowns.clear();
     this.#initializedPlayers.clear();
     this.#portalCooldowns.clear();
@@ -1725,7 +1736,7 @@ export class ShaLobbyRuntime {
   private async createBossBar(onlineCount: number): Promise<PaperHandle> {
     const settings = this.configuration.presentation.bossbar;
     const title = await component(
-      message(this.presentationFrame(settings['title-frames']), { online: onlineCount }),
+      message(this.bossBarFrame(settings['title-frames']), { online: onlineCount }),
     );
     try {
       const [color, overlay] = await Promise.all([
@@ -1789,6 +1800,7 @@ export class ShaLobbyRuntime {
     for (const [id, title] of prepared.titles) this.#preparedTitles.set(id, title);
     try {
       const online = await onlinePlayers();
+      this.#presentationOnlineCount = online.length;
       const resolved = await Promise.allSettled(
         online.map(async (current) => ({
           current,
@@ -1820,6 +1832,10 @@ export class ShaLobbyRuntime {
         ...rejectionReasons(removed),
         ...rejectionReasons(applied),
       ];
+      const bossbar = this.configuration.presentation.bossbar;
+      this.#presentationFrameIndex = bossbar.enabled
+        ? this.bossBarFrameIndex(bossbar['title-frames'])
+        : -1;
       if (failures.length > 0)
         console.error('[ShaLobby] Prepared player presentation was incomplete.', failures);
     } catch (error: unknown) {
@@ -1863,9 +1879,21 @@ export class ShaLobbyRuntime {
       throw new AggregateError(failures, 'Player bossbars could not be released.');
   }
 
-  private presentationFrame(frames: readonly string[]): string {
-    const interval = this.configuration.presentation['interval-ticks'] * 50;
-    const index = Math.floor(Date.now() / interval) % frames.length;
+  private bossBarFrameIndex(
+    frames: readonly string[],
+    animationTick = Math.max(0, this.#presentationAnimationTick - 1),
+  ): number {
+    const settings = this.configuration.presentation.bossbar;
+    const lastFrameStart = Math.max(0, frames.length - 1) * settings['frame-ticks'];
+    const cycleTicks = lastFrameStart + settings['last-frame-ticks'];
+    const elapsed = animationTick % cycleTicks;
+    return elapsed >= lastFrameStart
+      ? frames.length - 1
+      : Math.floor(elapsed / settings['frame-ticks']);
+  }
+
+  private bossBarFrame(frames: readonly string[]): string {
+    const index = this.#presentationFrameIndex < 0 ? 0 : this.#presentationFrameIndex;
     return frames[index] ?? '';
   }
 
@@ -1902,13 +1930,20 @@ export class ShaLobbyRuntime {
     onlineCount?: number,
     clearDisabledPlayerList = false,
     knownId?: string,
+    updatePlayerList = true,
   ): Promise<void> {
     const id = knownId ?? (await playerUniqueId(current));
     if (this.#inactivePresentations.has(id)) return;
     await this.serializePlayerPresentation(id, () =>
       this.#inactivePresentations.has(id)
         ? Promise.resolve()
-        : this.applyPlayerPresentationNow(current, id, onlineCount, clearDisabledPlayerList),
+        : this.applyPlayerPresentationNow(
+            current,
+            id,
+            onlineCount,
+            clearDisabledPlayerList,
+            updatePlayerList,
+          ),
     );
   }
 
@@ -1917,6 +1952,7 @@ export class ShaLobbyRuntime {
     id: string,
     onlineCount?: number,
     clearDisabledPlayerList = false,
+    updatePlayerList = true,
   ): Promise<void> {
     const resolvedOnlineCount = onlineCount ?? (await onlinePlayers()).length;
     let ownedBossBar = this.#bossBars.get(id);
@@ -1925,22 +1961,26 @@ export class ShaLobbyRuntime {
       ownedBossBar = undefined;
     }
     if (this.configuration.presentation.bossbar.enabled) {
+      let created = false;
       if (ownedBossBar === undefined) {
         ownedBossBar = {
           handle: await this.createBossBar(resolvedOnlineCount),
           revision: this.#revision,
         };
         this.#bossBars.set(id, ownedBossBar);
+        created = true;
       }
-      try {
-        await this.setBossBarVisibility(current, ownedBossBar.handle, true);
-      } catch (error: unknown) {
-        if (this.#bossBars.get(id) === ownedBossBar) this.#bossBars.delete(id);
-        await ownedBossBar.handle.$release();
-        throw error;
-      }
+      if (created)
+        try {
+          await this.setBossBarVisibility(current, ownedBossBar.handle, true);
+        } catch (error: unknown) {
+          if (this.#bossBars.get(id) === ownedBossBar) this.#bossBars.delete(id);
+          await ownedBossBar.handle.$release();
+          throw error;
+        }
     } else if (ownedBossBar !== undefined)
       await this.removePlayerPresentationNow(current, id, false);
+    if (!updatePlayerList) return;
     const settings = this.configuration.presentation['player-list'];
     if (!settings.enabled) {
       if (clearDisabledPlayerList)
@@ -1959,8 +1999,8 @@ export class ShaLobbyRuntime {
     };
     await this.sendPlayerList(
       current,
-      message(this.presentationFrame(settings['header-frames']), replacements),
-      message(this.presentationFrame(settings['footer-frames']), replacements),
+      message(settings.header, replacements),
+      message(settings.footer, replacements),
     );
     this.#pendingPlayerListClears.delete(id);
   }
@@ -2047,33 +2087,60 @@ export class ShaLobbyRuntime {
       throw new AggregateError(failures, 'Player presentation could not be cleared.');
   }
 
-  private async refreshPresentation(): Promise<void> {
+  private async refreshPresentation(animationTick: number): Promise<void> {
     if (this.#closed) return;
-    if (
-      !this.configuration.presentation.bossbar.enabled &&
-      !this.configuration.presentation['player-list'].enabled &&
-      this.#bossBars.size === 0 &&
-      this.#pendingPlayerListClears.size === 0
-    )
-      return;
+    const settings = this.configuration.presentation.bossbar;
+    const playerList = this.configuration.presentation['player-list'];
+    const frameIndex = settings.enabled
+      ? this.bossBarFrameIndex(settings['title-frames'], animationTick)
+      : -1;
+    const frameChanged = frameIndex !== this.#presentationFrameIndex;
+    const playerListTracksOnline =
+      playerList.enabled &&
+      (playerList.header.includes('%online%') || playerList.footer.includes('%online%'));
+    const periodicMaintenance =
+      Math.floor(animationTick / PRESENTATION_MAINTENANCE_TICKS) !==
+      Math.floor(this.#presentationMaintenanceTick / PRESENTATION_MAINTENANCE_TICKS);
+    this.#presentationMaintenanceTick = animationTick;
+    const maintenanceDue =
+      this.#pendingPlayerListClears.size > 0 ||
+      (periodicMaintenance && (this.#bossBars.size > 0 || playerListTracksOnline));
+    this.#presentationFrameIndex = frameIndex;
+    if ((!frameChanged || this.#bossBars.size === 0) && !maintenanceDue) return;
     const online = await onlinePlayers();
-    const refreshed = await Promise.allSettled(
-      online.map(async (current) => {
-        const id = await playerUniqueId(current);
-        if (await this.isManagedPlayer(current))
-          await this.applyPlayerPresentation(
-            current,
-            online.length,
-            this.#pendingPlayerListClears.has(id),
-            id,
-          );
-        else
-          await this.removePlayerPresentation(current, id, this.#pendingPlayerListClears.has(id));
-      }),
-    );
-    if (this.configuration.presentation.bossbar.enabled && this.#bossBars.size > 0) {
+    const onlineChanged = online.length !== this.#presentationOnlineCount;
+    this.#presentationOnlineCount = online.length;
+    const refreshPlayerList = onlineChanged && playerListTracksOnline;
+    const refreshed =
+      maintenanceDue || refreshPlayerList
+        ? await Promise.allSettled(
+            online.map(async (current) => {
+              const id = await playerUniqueId(current);
+              if (await this.isManagedPlayer(current))
+                await this.applyPlayerPresentation(
+                  current,
+                  online.length,
+                  this.#pendingPlayerListClears.has(id),
+                  id,
+                  refreshPlayerList || this.#pendingPlayerListClears.has(id),
+                );
+              else
+                await this.removePlayerPresentation(
+                  current,
+                  id,
+                  this.#pendingPlayerListClears.has(id),
+                );
+            }),
+          )
+        : [];
+    const frame = settings['title-frames'][frameIndex] ?? '';
+    if (
+      (frameChanged || (onlineChanged && frame.includes('%online%'))) &&
+      settings.enabled &&
+      this.#bossBars.size > 0
+    ) {
       const title = await component(
-        message(this.presentationFrame(this.configuration.presentation.bossbar['title-frames']), {
+        message(frame, {
           online: online.length,
         }),
       );
@@ -2644,8 +2711,8 @@ export class ShaLobbyRuntime {
       ...candidate.sidebar['title-frames'],
       ...candidate.sidebar.lines,
       ...candidate.presentation.bossbar['title-frames'],
-      ...candidate.presentation['player-list']['header-frames'],
-      ...candidate.presentation['player-list']['footer-frames'],
+      candidate.presentation['player-list'].header,
+      candidate.presentation['player-list'].footer,
       ...candidate.servers.map((server) => server['display-name']),
     ];
     for (const value of texts) await (await component(value)).$release();
@@ -2700,6 +2767,11 @@ export class ShaLobbyRuntime {
   }
 
   private async restartTasks(): Promise<void> {
+    this.#presentationAnimationTick = 0;
+    this.#presentationFrameIndex = -1;
+    this.#presentationMaintenanceTick = -1;
+    this.#presentationOnlineCount = -1;
+    this.#presentationRefreshTick = undefined;
     const scheduler = await staticExact<PaperHandle>(
       Bukkit,
       'getGlobalRegionScheduler',
@@ -2775,17 +2847,26 @@ export class ShaLobbyRuntime {
             plugin,
             () => {
               runOutsidePaperFrame(() => {
-                if (
-                  this.#closed ||
-                  this.#reloading ||
-                  revision !== this.#revision ||
-                  this.#presentationRefreshActive
-                )
-                  return;
+                if (this.#closed || this.#reloading || revision !== this.#revision) return;
+                const animationTick = this.#presentationAnimationTick;
+                this.#presentationAnimationTick += 1;
+                this.#presentationRefreshTick = animationTick;
+                if (this.#presentationRefreshActive) return;
                 this.#presentationRefreshActive = true;
                 this.startDetached(
                   'Animated presentation refresh',
-                  () => this.refreshPresentation(),
+                  async () => {
+                    while (
+                      !this.#closed &&
+                      !this.#reloading &&
+                      revision === this.#revision &&
+                      this.#presentationRefreshTick !== undefined
+                    ) {
+                      const tick = this.#presentationRefreshTick;
+                      this.#presentationRefreshTick = undefined;
+                      await this.refreshPresentation(tick);
+                    }
+                  },
                   () => {
                     this.#presentationRefreshActive = false;
                   },
@@ -2793,7 +2874,7 @@ export class ShaLobbyRuntime {
               });
             },
             1,
-            Math.max(1, this.configuration.presentation['interval-ticks']),
+            1,
           ),
         );
       } finally {

@@ -71,7 +71,7 @@ describe('lobby configuration', () => {
     );
   });
 
-  it('uses the animated Spanish presentation defaults for an existing scoreboard file', async () => {
+  it('uses the Spanish typewriter defaults for an existing scoreboard file', async () => {
     contents.set(
       'scoreboard.yml',
       String(contents.get('scoreboard.yml')).replace(/\npresentation:[\s\S]*$/u, '\n'),
@@ -79,8 +79,8 @@ describe('lobby configuration', () => {
 
     const configuration = await new LobbyConfigurationStore().load();
 
-    expect(configuration.presentation.bossbar['title-frames'][0]).toContain('TIENDA');
-    expect(configuration.presentation['player-list']['header-frames'][0]).toContain('Bienvenido');
+    expect(configuration.presentation.bossbar['title-frames'].at(-1)).toContain('TIENDA');
+    expect(configuration.presentation['player-list'].header).toContain('Bienvenido');
   });
 
   it('rejects an invalid bossbar color', async () => {
@@ -90,5 +90,50 @@ describe('lobby configuration', () => {
     );
 
     await expect(new LobbyConfigurationStore().load()).rejects.toThrow('bossbar.color is invalid');
+  });
+
+  it('normalizes legacy timing and player-list frame arrays', async () => {
+    contents.set(
+      'scoreboard.yml',
+      String(contents.get('scoreboard.yml')).replace(
+        /presentation:[\s\S]*$/u,
+        `presentation:
+  interval-ticks: 1728000
+  bossbar:
+    enabled: true
+    color: PURPLE
+    overlay: PROGRESS
+    progress: 1
+    title-frames:
+      - Legacy shop
+  player-list:
+    enabled: true
+    header-frames:
+      - First header
+      - Ignored header
+    footer-frames:
+      - First footer
+      - Ignored footer
+`,
+      ),
+    );
+
+    const presentation = (await new LobbyConfigurationStore().load()).presentation;
+
+    expect(presentation.bossbar['frame-ticks']).toBe(1_727_999);
+    expect(presentation.bossbar['last-frame-ticks']).toBe(1_728_000);
+    expect(presentation['player-list'].header).toBe('First header');
+    expect(presentation['player-list'].footer).toBe('First footer');
+  });
+
+  it('requires the final bossbar frame to outlast ordinary frames', async () => {
+    contents.set(
+      'scoreboard.yml',
+      String(contents.get('scoreboard.yml')).replace('last-frame-ticks: 60', 'last-frame-ticks: 2'),
+    );
+
+    await expect(new LobbyConfigurationStore().load()).rejects.toThrow(
+      'last-frame-ticks must exceed frame-ticks',
+    );
   });
 });

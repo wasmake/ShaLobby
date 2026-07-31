@@ -8,8 +8,8 @@
 6. Run `/lobby reload`.
 
 Existing `scoreboard.yml` files without `presentation` automatically use the shipped Spanish shop
-bossbar and player-list animation. Add an explicit `presentation` section to customize or disable
-them.
+bossbar typewriter and static player list. Add an explicit `presentation` section to customize or
+disable them.
 
 No `managed-lobby` Runtime section is required.
 

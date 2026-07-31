@@ -1,7 +1,7 @@
 # ShaLobby
 
 ShaLobby is a TypeScript Paper lobby plugin running on ShamooRuntime. Its listeners, inventories,
-scoreboards, animated bossbar and player list, player state, portals, visibility, proxy transfers,
+scoreboards, typewriter bossbar and player list, player state, portals, visibility, proxy transfers,
 YAML parsing, and commands are all implemented in this repository.
 
 It uses ShamooRuntime's plugin-neutral generated Paper bridge. There is no `shalobby` owner gate,

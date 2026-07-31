@@ -24,29 +24,34 @@ sidebar:
     - '<#303746>◆ ───────────── ◆</#303746>'
 
 presentation:
-  interval-ticks: 20
   bossbar:
     enabled: true
     color: PURPLE
     overlay: PROGRESS
     progress: 1.0
+    frame-ticks: 2
+    last-frame-ticks: 60
     title-frames:
-      - '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOBBY</bold></gradient> <#F8FAFC>Rangos, cosméticos y más</#F8FAFC>'
-      - '<#FFB347><bold>OFERTAS EXCLUSIVAS</bold></#FFB347> <#F8FAFC>Visita nuestra tienda</#F8FAFC>'
-      - '<#55FF88><bold>APOYA AL SERVIDOR</bold></#55FF88> <#F8FAFC>Descubre ventajas increíbles</#F8FAFC>'
+      - '<gradient:#38D9FF:#A855F7><bold>T</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TI</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TIE</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TIEN</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TIEND</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TIENDA</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TIENDA S</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TIENDA SH</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TIENDA SHA</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TIENDA SHAL</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALO</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOB</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOBB</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOBBY</bold></gradient>'
+      - '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOBBY</bold></gradient> <#F8FAFC>• Rangos, cosméticos y más</#F8FAFC>'
   player-list:
     enabled: true
-    header-frames:
-      - |-
-        <gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>
-        <#A8B3C7>Bienvenido, <#F8FAFC>%player%</#F8FAFC></#A8B3C7>
-      - |-
-        <gradient:#A855F7:#4F7CFF:#38D9FF><bold>◆ SHALOBBY ◆</bold></gradient>
-        <#A8B3C7>Elige tu próxima aventura</#A8B3C7>
-    footer-frames:
-      - |-
-        <#A8B3C7>Jugadores en línea: <#F8FAFC>%online%</#F8FAFC></#A8B3C7>
-        <#55FF88>¡Que disfrutes tu estancia!</#55FF88>
-      - |-
-        <#FFB347>Visita la tienda y descubre nuestras ofertas</#FFB347>
-        <#A8B3C7>Gracias por jugar en ShaLobby</#A8B3C7>
+    header: |-
+      <gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>
+      <#A8B3C7>Bienvenido, <#F8FAFC>%player%</#F8FAFC></#A8B3C7>
+    footer: |-
+      <#A8B3C7>Jugadores en línea: <#F8FAFC>%online%</#F8FAFC></#A8B3C7>
+      <#55FF88>¡Que disfrutes tu estancia!</#55FF88>
