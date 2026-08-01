@@ -34,18 +34,26 @@ const DEFAULT_MENU_IDS = Object.freeze([
   'profile',
   'settings',
 ] as const);
+const DEFAULT_GAME_SERVER_IDS = Object.freeze([
+  'the-walls',
+  'hunger-games',
+  'escape-from-the-beast',
+  'defend-the-village',
+  'the-bridges',
+  'the-towers',
+  'bed-wars',
+  'kitpvp',
+] as const);
 const DEFAULT_SERVER_IDS = Object.freeze([
-  'survival',
-  'skyblock',
-  'minigames',
+  ...DEFAULT_GAME_SERVER_IDS,
   'lobby-1',
   'lobby-2',
   'lobby-3',
 ] as const);
 const DEFAULT_PORTAL_IDS = Object.freeze([
-  'portal-survival',
-  'portal-skyblock',
-  'portal-minigames',
+  'portal-the-walls',
+  'portal-hunger-games',
+  'portal-bed-wars',
 ] as const);
 const ARTIFACT_FILES = Object.freeze(['index.js', 'index.js.map', 'shamoo-plugin.json'] as const);
 const BUILD_FILES = Object.freeze([
@@ -470,6 +478,17 @@ describe('managed lobby defaults contract', () => {
       uniqueSlot(itemSlots, item['slot'], 9, `items.yml.items[${String(index)}].slot`);
       nonItalicItem(item, `items.yml.items[${String(index)}]`);
       actionReferences(item['action'], `items.yml.items[${String(index)}].action`, references);
+      const lore = sequence(item['lore'], `items.yml.items[${String(index)}].lore`);
+      expect(
+        lore.length,
+        `items.yml.items[${String(index)}] multiline lore`,
+      ).toBeGreaterThanOrEqual(6);
+      expect(lore, `items.yml.items[${String(index)}] spacing`).toContain(
+        '<italic:false><#303746> </#303746>',
+      );
+      expect(lore.at(-1), `items.yml.items[${String(index)}] CTA`).toMatch(
+        /<#38D9FF><bold>¡Click /u,
+      );
     }
 
     for (const [menuIndex, entry] of menus.entries()) {
@@ -496,9 +515,40 @@ describe('managed lobby defaults contract', () => {
         const action = mapping(slot['action'], `menus.slots[${String(slotIndex)}].action`);
         if (action['type'] !== 'none') {
           const lore = sequence(slot['lore'], `menus.slots[${String(slotIndex)}].lore`);
-          expect(lore.at(-1), `menus.slots[${String(slotIndex)}] CTA`).toMatch(/<#38D9FF>Click /u);
+          expect(lore.at(-1), `menus.slots[${String(slotIndex)}] CTA`).toMatch(
+            /<#38D9FF><bold>¡Click /u,
+          );
         }
       }
+    }
+
+    const gameMenu = mapping(
+      menus.find((entry) => mapping(entry, 'menu')['id'] === 'game-selector'),
+      'menus.yml.game-selector',
+    );
+    expect(gameMenu['rows']).toBe(6);
+    const gameSlots = sequence(gameMenu['slots'], 'menus.yml.game-selector.slots');
+    const gameTargets = gameSlots.flatMap((entry, index) => {
+      const slot = mapping(entry, `menus.yml.game-selector.slots[${String(index)}]`);
+      const action = mapping(
+        slot['action'],
+        `menus.yml.game-selector.slots[${String(index)}].action`,
+      );
+      return action['type'] === 'connect'
+        ? [text(action['target'], `menus.yml.game-selector.slots[${String(index)}].action.target`)]
+        : [];
+    });
+    expect(gameTargets).toEqual([...DEFAULT_GAME_SERVER_IDS]);
+    for (const [index, entry] of gameSlots.entries()) {
+      const slot = mapping(entry, `menus.yml.game-selector.slots[${String(index)}]`);
+      const action = mapping(
+        slot['action'],
+        `menus.yml.game-selector.slots[${String(index)}].action`,
+      );
+      if (action['type'] !== 'connect') continue;
+      const lore = sequence(slot['lore'], `menus.yml.game-selector.slots[${String(index)}].lore`);
+      expect(lore).toHaveLength(11);
+      expect(lore.join('\n')).toContain('✦ INFORMACIÓN');
     }
 
     for (const [index, entry] of portals.entries()) {

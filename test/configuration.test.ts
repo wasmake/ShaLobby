@@ -41,7 +41,7 @@ describe('lobby configuration', () => {
     expect(configuration.items).toHaveLength(5);
     expect(configuration.menus).toHaveLength(4);
     expect(configuration.menus[0]?.filler?.material).toBe('GRAY_STAINED_GLASS_PANE');
-    expect(configuration.servers).toHaveLength(6);
+    expect(configuration.servers).toHaveLength(11);
     expect(configuration.portals).toHaveLength(3);
     expect(configuration.presentation.bossbar.enabled).toBe(true);
     expect(configuration.presentation['player-list'].enabled).toBe(true);

@@ -1,16 +1,36 @@
 servers:
-  - id: survival
+  - id: the-walls
     enabled: true
-    target: survival
-    display-name: '<italic:false><#55FF88><bold>◆ Supervivencia</bold></#55FF88>'
-  - id: skyblock
+    target: the-walls
+    display-name: '<italic:false><gradient:#38D9FF:#4F7CFF><bold>◆ The Walls</bold></gradient>'
+  - id: hunger-games
     enabled: true
-    target: skyblock
-    display-name: '<italic:false><#38D9FF><bold>◆ Skyblock</bold></#38D9FF>'
-  - id: minigames
+    target: hunger-games
+    display-name: '<italic:false><gradient:#38D9FF:#4F7CFF><bold>◆ Hunger Games</bold></gradient>'
+  - id: escape-from-the-beast
     enabled: true
-    target: minigames
-    display-name: '<italic:false><#FFD166><bold>◆ Minijuegos</bold></#FFD166>'
+    target: escape-from-the-beast
+    display-name: '<italic:false><gradient:#38D9FF:#4F7CFF><bold>◆ Escape from the Beast</bold></gradient>'
+  - id: defend-the-village
+    enabled: true
+    target: defend-the-village
+    display-name: '<italic:false><gradient:#38D9FF:#4F7CFF><bold>◆ Defend the Village</bold></gradient>'
+  - id: the-bridges
+    enabled: true
+    target: the-bridges
+    display-name: '<italic:false><gradient:#38D9FF:#4F7CFF><bold>◆ The Bridges</bold></gradient>'
+  - id: the-towers
+    enabled: true
+    target: the-towers
+    display-name: '<italic:false><gradient:#38D9FF:#4F7CFF><bold>◆ The Towers</bold></gradient>'
+  - id: bed-wars
+    enabled: true
+    target: bed-wars
+    display-name: '<italic:false><gradient:#38D9FF:#4F7CFF><bold>◆ Bed Wars</bold></gradient>'
+  - id: kitpvp
+    enabled: true
+    target: kitpvp
+    display-name: '<italic:false><gradient:#38D9FF:#4F7CFF><bold>◆ KitPvP</bold></gradient>'
   - id: lobby-1
     enabled: true
     target: lobby-1

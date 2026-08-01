@@ -1,34 +1,34 @@
 portals:
-  - id: portal-survival
+  - id: portal-the-walls
     enabled: false
     world: world
     min: { x: -12, y: 64, z: 18 }
     max: { x: -8, y: 68, z: 20 }
-    permission: lobby.portal.survival
+    permission: lobby.portal.the-walls
     priority: 10
     cooldown-ms: 2500
-    destination: survival
-    action: { type: connect, target: survival }
+    destination: the-walls
+    action: { type: connect, target: the-walls }
     visualize: false
-  - id: portal-skyblock
+  - id: portal-hunger-games
     enabled: false
     world: world
     min: { x: -2, y: 64, z: 18 }
     max: { x: 2, y: 68, z: 20 }
-    permission: lobby.portal.skyblock
+    permission: lobby.portal.hunger-games
     priority: 10
     cooldown-ms: 2500
-    destination: skyblock
-    action: { type: connect, target: skyblock }
+    destination: hunger-games
+    action: { type: connect, target: hunger-games }
     visualize: false
-  - id: portal-minigames
+  - id: portal-bed-wars
     enabled: false
     world: world
     min: { x: 8, y: 64, z: 18 }
     max: { x: 12, y: 68, z: 20 }
-    permission: lobby.portal.minigames
+    permission: lobby.portal.bed-wars
     priority: 10
     cooldown-ms: 2500
-    destination: minigames
-    action: { type: connect, target: minigames }
+    destination: bed-wars
+    action: { type: connect, target: bed-wars }
     visualize: false
