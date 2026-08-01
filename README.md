@@ -26,9 +26,10 @@ The project installs its coordinated ShamooTS dependencies from the scoped regis
 The pinned Shamoo bundler is patched to target a neutral JavaScript runtime. This selects
 browser-safe dependency exports and prevents unsupported Node built-in imports in the plugin bundle.
 
-`pnpm build` emits the three compiled plugin files plus `dist/data/*.yml`. Runtime copies missing
-seed files into stable policy-confined storage on first load and preserves subsequent administrator
-edits.
+`pnpm build` emits the lowercase `shalobby/` plugin directory and a compressed
+`shalobby.tar.gz` package. The directory contains the three compiled plugin files plus
+`shalobby/data/*.yml`; macOS metadata is excluded from both outputs. Runtime copies missing seed
+files into stable policy-confined storage on first load and preserves subsequent administrator edits.
 
 ## Runtime Data
 

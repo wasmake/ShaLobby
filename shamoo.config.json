@@ -6,7 +6,7 @@
   "entrypoint": "src/paper.ts",
   "paperEntrypoint": "src/paper.ts",
   "tsconfig": "tsconfig.json",
-  "outDir": "dist",
+  "outDir": "shalobby",
   "permissions": {
     "builtins": [],
     "filesystem": {

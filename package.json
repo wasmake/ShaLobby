@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "shamooc && node scripts/copy-defaults.mjs",
+    "build": "shamooc && node scripts/package-build.mjs",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "doctor": "shamoo doctor",
     "format": "prettier --write .",

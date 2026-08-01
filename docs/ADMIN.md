@@ -2,12 +2,13 @@
 
 1. Build and install the coordinated ShamooRuntime Paper JAR.
 2. Build ShaLobby with `pnpm build`.
-3. Install the contents of `dist/` as the `shalobby` Shamoo plugin artifact.
+3. Extract `shalobby.tar.gz`, or install the contents of `shalobby/`, as the `shalobby` Shamoo
+   plugin artifact.
 4. Start Paper once to seed persistent YAML.
 5. Edit `plugins/ShamooRuntime/plugin-data/shalobby/data/*.yml`.
 6. Run `/lobby reload`.
 
-Existing `scoreboard.yml` files without `presentation` automatically use the shipped Spanish shop
+Existing `scoreboard.yml` files without `presentation` automatically use the shipped Akardoo
 bossbar typewriter and static player list. Add an explicit `presentation` section to customize or
 disable them.
 

@@ -21,7 +21,9 @@ const DEFAULT_FILES = Object.freeze([
 ] as const);
 const DEFAULTS = resolve(import.meta.dirname, '../defaults');
 const PROJECT = resolve(import.meta.dirname, '..');
-const DIST = resolve(PROJECT, 'dist');
+const ARTIFACT_NAME = 'shalobby';
+const ARTIFACT = resolve(PROJECT, ARTIFACT_NAME);
+const ARCHIVE = resolve(PROJECT, `${ARTIFACT_NAME}.tar.gz`);
 const RUNTIME_DEFAULTS = process.env['SHALOBBY_RUNTIME_DEFAULTS_DIR'];
 const ID = /^[a-z][a-z0-9_-]{0,63}$/u;
 const PLACEHOLDER = /%[a-z][a-z0-9_-]{0,63}%/gu;
@@ -45,9 +47,9 @@ const DEFAULT_PORTAL_IDS = Object.freeze([
   'portal-skyblock',
   'portal-minigames',
 ] as const);
-const DIST_FILES = Object.freeze(['index.js', 'index.js.map', 'shamoo-plugin.json'] as const);
+const ARTIFACT_FILES = Object.freeze(['index.js', 'index.js.map', 'shamoo-plugin.json'] as const);
 const BUILD_FILES = Object.freeze([
-  ...DIST_FILES,
+  ...ARTIFACT_FILES,
   ...DEFAULT_FILES.map((file) => `data/${file}`),
 ] as const);
 const SCOREBOARD_PLACEHOLDERS = Object.freeze([
@@ -235,9 +237,18 @@ async function buildHashes(): Promise<Readonly<Record<string, string>>> {
     cwd: PROJECT,
     env: { ...process.env, NO_COLOR: '1' },
   });
-  expect((await readdir(DIST)).sort()).toEqual([...DIST_FILES, 'data'].sort());
-  expect((await readdir(resolve(DIST, 'data'))).sort()).toEqual([...DEFAULT_FILES].sort());
-  const manifest: unknown = JSON.parse(await readFile(resolve(DIST, 'shamoo-plugin.json'), 'utf8'));
+  expect((await readdir(ARTIFACT)).sort()).toEqual([...ARTIFACT_FILES, 'data'].sort());
+  expect((await readdir(resolve(ARTIFACT, 'data'))).sort()).toEqual([...DEFAULT_FILES].sort());
+  expect(await readdir(PROJECT)).not.toContain('dist');
+  const { stdout: archiveListing } = await executeFile('tar', ['-tzf', ARCHIVE]);
+  const archiveFiles = archiveListing.trim().split('\n');
+  expect(archiveFiles).toContain(`${ARTIFACT_NAME}/`);
+  expect(archiveFiles).toContain(`${ARTIFACT_NAME}/shamoo-plugin.json`);
+  expect(archiveFiles).toContain(`${ARTIFACT_NAME}/data/scoreboard.yml`);
+  expect(archiveFiles.join('\n')).not.toMatch(/(?:__MACOSX|\.DS_Store|\/\._)/u);
+  const manifest: unknown = JSON.parse(
+    await readFile(resolve(ARTIFACT, 'shamoo-plugin.json'), 'utf8'),
+  );
   const manifestRoot = mapping(manifest, 'manifest');
   const paper = mapping(
     mapping(manifestRoot['platforms'], 'manifest.platforms')['paper'],
@@ -281,19 +292,26 @@ async function buildHashes(): Promise<Readonly<Record<string, string>>> {
       'ShaLobbyPlugin',
     ].sort(),
   );
-  const bundle = await readFile(resolve(DIST, 'index.js'), 'utf8');
+  const bundle = await readFile(resolve(ARTIFACT, 'index.js'), 'utf8');
   expect(bundle).not.toContain('Dynamic require of "');
   expect(bundle).not.toMatch(
     /\b(?:__require\(|require\(|from\s+|import\s*)["'](?:node:)?(?:buffer|process)["']/u,
   );
-  return Object.fromEntries(
-    await Promise.all(
-      BUILD_FILES.map(async (file) => {
-        const content = await readFile(resolve(DIST, file));
-        return [file, createHash('sha256').update(content).digest('hex')] as const;
-      }),
-    ),
+  const hashes = await Promise.all(
+    BUILD_FILES.map(async (file) => {
+      const content = await readFile(resolve(ARTIFACT, file));
+      return [file, createHash('sha256').update(content).digest('hex')] as const;
+    }),
   );
+  return Object.fromEntries([
+    ...hashes,
+    [
+      `${ARTIFACT_NAME}.tar.gz`,
+      createHash('sha256')
+        .update(await readFile(ARCHIVE))
+        .digest('hex'),
+    ],
+  ]);
 }
 
 describe('managed lobby defaults contract', () => {
