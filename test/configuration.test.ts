@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { pluginFiles } from '@shamoo/config';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LOBBY_FILES, LobbyConfigurationStore } from '../src/configuration.js';
+import { LOBBY_FILES } from '../src/configuration/files.js';
+import { YamlLobbyConfigurationProvider } from '../src/providers/lobby-configuration-provider.js';
 
 vi.mock('@shamoo/config', () => ({
   pluginFiles: {
@@ -34,11 +35,12 @@ beforeEach(async () => {
 
 describe('lobby configuration', () => {
   it('accepts the complete shipped defaults', async () => {
-    const configuration = await new LobbyConfigurationStore().load();
+    const configuration = await new YamlLobbyConfigurationProvider().load();
 
     expect(configuration.settings.worlds.map((world) => world.name)).toEqual(['world']);
     expect(configuration.items).toHaveLength(5);
     expect(configuration.menus).toHaveLength(4);
+    expect(configuration.menus[0]?.filler?.material).toBe('GRAY_STAINED_GLASS_PANE');
     expect(configuration.servers).toHaveLength(6);
     expect(configuration.portals).toHaveLength(3);
     expect(configuration.presentation.bossbar.enabled).toBe(true);
@@ -57,7 +59,7 @@ describe('lobby configuration', () => {
       'messages.yml',
       String(contents.get('messages.yml')).replace(
         `  - id: bienvenida
-    title: '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>'
+    title: '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ AKARDOO NETWORK ✦</bold></gradient>'
     subtitle: '<#A8B3C7>Tu aventura comienza aquí</#A8B3C7>'
     fade-in-ticks: 10
     stay-ticks: 60
@@ -66,15 +68,15 @@ describe('lobby configuration', () => {
     stay-ticks: 60
     id: bienvenida
     fade-out-ticks: 20
-    title: '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>'
+    title: '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ AKARDOO NETWORK ✦</bold></gradient>'
     fade-in-ticks: 10`,
       ),
     );
 
-    const resources = (await new LobbyConfigurationStore().load()).messageResources;
+    const resources = (await new YamlLobbyConfigurationProvider().load()).messageResources;
 
     expect(resources.titles['bienvenida']).toEqual({
-      title: '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>',
+      title: '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ AKARDOO NETWORK ✦</bold></gradient>',
       subtitle: '<#A8B3C7>Tu aventura comienza aquí</#A8B3C7>',
       'fade-in-ticks': 10,
       'stay-ticks': 60,
@@ -88,7 +90,19 @@ describe('lobby configuration', () => {
       String(contents.get('items.yml')).replace('target: game-selector', 'target: missing-menu'),
     );
 
-    await expect(new LobbyConfigurationStore().load()).rejects.toThrow('unknown menu');
+    await expect(new YamlLobbyConfigurationProvider().load()).rejects.toThrow('unknown menu');
+  });
+
+  it('accepts ignored legacy targets on none and spawn actions', async () => {
+    contents.set(
+      'menus.yml',
+      String(contents.get('menus.yml')).replace(
+        'action: { type: spawn }',
+        'action: { type: spawn, target: legacy }',
+      ),
+    );
+
+    await expect(new YamlLobbyConfigurationProvider().load()).resolves.toBeDefined();
   });
 
   it('rejects duplicate message keys before accepting the runtime snapshot', async () => {
@@ -100,7 +114,7 @@ describe('lobby configuration', () => {
       ),
     );
 
-    await expect(new LobbyConfigurationStore().load()).rejects.toThrow(
+    await expect(new YamlLobbyConfigurationProvider().load()).rejects.toThrow(
       'messages.yml no es YAML válido',
     );
   });
@@ -117,20 +131,20 @@ describe('lobby configuration', () => {
 `,
     );
 
-    await expect(new LobbyConfigurationStore().load()).rejects.toThrow(
+    await expect(new YamlLobbyConfigurationProvider().load()).rejects.toThrow(
       'cannot be empty while enabled',
     );
   });
 
-  it('uses the Spanish typewriter defaults for an existing scoreboard file', async () => {
+  it('uses the Akardoo presentation defaults for an existing scoreboard file', async () => {
     contents.set(
       'scoreboard.yml',
       String(contents.get('scoreboard.yml')).replace(/\npresentation:[\s\S]*$/u, '\n'),
     );
 
-    const configuration = await new LobbyConfigurationStore().load();
+    const configuration = await new YamlLobbyConfigurationProvider().load();
 
-    expect(configuration.presentation.bossbar['title-frames'].at(-1)).toContain('TIENDA');
+    expect(configuration.presentation.bossbar['title-frames'].at(-1)).toContain('AKARDOO NETWORK');
     expect(configuration.presentation['player-list'].header).toContain('Bienvenido');
   });
 
@@ -140,7 +154,9 @@ describe('lobby configuration', () => {
       String(contents.get('scoreboard.yml')).replace('color: PURPLE', 'color: ORANGE'),
     );
 
-    await expect(new LobbyConfigurationStore().load()).rejects.toThrow('bossbar.color is invalid');
+    await expect(new YamlLobbyConfigurationProvider().load()).rejects.toThrow(
+      'bossbar.color is invalid',
+    );
   });
 
   it('normalizes legacy timing and player-list frame arrays', async () => {
@@ -169,7 +185,7 @@ describe('lobby configuration', () => {
       ),
     );
 
-    const presentation = (await new LobbyConfigurationStore().load()).presentation;
+    const presentation = (await new YamlLobbyConfigurationProvider().load()).presentation;
 
     expect(presentation.bossbar['frame-ticks']).toBe(1_727_999);
     expect(presentation.bossbar['last-frame-ticks']).toBe(1_728_000);
@@ -183,7 +199,7 @@ describe('lobby configuration', () => {
       String(contents.get('scoreboard.yml')).replace('last-frame-ticks: 60', 'last-frame-ticks: 2'),
     );
 
-    await expect(new LobbyConfigurationStore().load()).rejects.toThrow(
+    await expect(new YamlLobbyConfigurationProvider().load()).rejects.toThrow(
       'last-frame-ticks must exceed frame-ticks',
     );
   });

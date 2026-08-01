@@ -4,7 +4,7 @@ import {
   ManagedLobbyHostError,
   type ManagedLobbyRequest,
   type ManagedLobbyResult,
-} from '../src/managed-lobby.js';
+} from '../src/api/managed-lobby.js';
 import { describe, expect, it, vi } from 'vitest';
 
 const PLAYER = '123e4567-e89b-12d3-a456-426614174000';

@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { hydratePaperValue, type PaperHandle } from '@shamoo/paper-raw';
 
-import { ShaLobbyRuntime } from '../src/lobby.js';
+import { PortalManager } from '../src/managers/portal-manager.js';
+import { PortalSessionManager } from '../src/managers/portal-session-manager.js';
+import { VisibilityManager } from '../src/managers/visibility-manager.js';
+import { PaperLobbyHandler } from '../src/platform/paper/paper-lobby-handler.js';
+import { ActiveLobbyConfigurationProvider } from '../src/providers/active-lobby-configuration-provider.js';
+import { ConfigurationPortalProvider } from '../src/providers/configuration-portal-provider.js';
+import { YamlLobbyConfigurationProvider } from '../src/providers/lobby-configuration-provider.js';
 
 interface RawHandle {
   readonly $paperHandle: string;
@@ -20,6 +26,29 @@ interface EventValues {
 type HostCallback = (...arguments_: readonly unknown[]) => unknown;
 
 const originalHost = Object.getOwnPropertyDescriptor(globalThis, 'host');
+
+function createHandler(): PaperLobbyHandler {
+  const configurationSource = new YamlLobbyConfigurationProvider();
+  const activeConfiguration = new ActiveLobbyConfigurationProvider();
+  const portalProvider = new ConfigurationPortalProvider(activeConfiguration, configurationSource);
+  const portalSessionManager = new PortalSessionManager();
+  const portalManager = new PortalManager(
+    portalProvider,
+    portalProvider,
+    portalSessionManager,
+    () => activeConfiguration.require().settings['portal-cooldown-ms'],
+  );
+  const visibilityManager = new VisibilityManager(
+    () => activeConfiguration.require().settings.visibility.default,
+  );
+  return new PaperLobbyHandler(
+    configurationSource,
+    activeConfiguration,
+    portalManager,
+    portalSessionManager,
+    visibilityManager,
+  );
+}
 
 function raw(id: string, type: string, identity = id): RawHandle {
   return { $paperHandle: id, $paperObject: identity, type };
@@ -136,7 +165,7 @@ afterEach(() => {
 describe('player movement scheduling', () => {
   it('coalesces pending movement and processes only the latest destination', async () => {
     const harness = movementHarness();
-    const runtime = new ShaLobbyRuntime();
+    const runtime = createHandler();
 
     await runtime.move(harness.event('first', 'first'));
     await runtime.move(harness.event('second', 'second'));
@@ -160,7 +189,7 @@ describe('player movement scheduling', () => {
 
   it('drops rotation-only movement before retaining event handles', async () => {
     const harness = movementHarness();
-    const runtime = new ShaLobbyRuntime();
+    const runtime = createHandler();
 
     await runtime.move(harness.event('rotation', 'rotation', false));
 
@@ -170,7 +199,7 @@ describe('player movement scheduling', () => {
 
   it('cleans the mailbox when movement scheduling cannot start', async () => {
     const harness = movementHarness(false);
-    const runtime = new ShaLobbyRuntime();
+    const runtime = createHandler();
 
     await expect(runtime.move(harness.event('first', 'first'))).rejects.toThrow(
       'Scheduler unavailable.',
@@ -197,7 +226,7 @@ describe('player movement scheduling', () => {
 
   it('discards queued movement when the player quits', async () => {
     const harness = movementHarness();
-    const runtime = new ShaLobbyRuntime();
+    const runtime = createHandler();
 
     await runtime.move(harness.event('move', 'queued'));
     await runtime.quit(harness.quitEvent('quit'));

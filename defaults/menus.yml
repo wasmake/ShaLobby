@@ -1,216 +1,306 @@
 menus:
   - id: game-selector
-    rows: 3
-    title: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ JUEGOS ◆</bold></gradient>'
+    rows: 4
+    title: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ MODOS DE JUEGO ✦</bold></gradient>'
+    filler:
+      material: GRAY_STAINED_GLASS_PANE
+      amount: 1
+      name: '<italic:false><#303746> </#303746>'
+      lore: []
     slots:
       - slot: 4
         material: NETHER_STAR
         amount: 1
-        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ Elige una aventura</bold></gradient>'
+        name: '<italic:false><#38D9FF><bold>AKARDOO NETWORK</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>La disponibilidad se confirma al conectar.</#A8B3C7>'
-          - '<italic:false><#303746>•</#303746> <#F8FAFC>No se muestran estados estimados.</#F8FAFC>'
+          - '<italic:false><#A855F7><bold>MODOS DE JUEGO</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>Elige tu próxima aventura.</#A8B3C7>'
+          - '<italic:false><#A8B3C7>Conexión rápida y directa.</#A8B3C7>'
         action: { type: none }
-      - slot: 10
+      - slot: 11
         material: GRASS_BLOCK
         amount: 1
-        name: '<italic:false><#55FF88><bold>◆ Supervivencia</bold></#55FF88>'
+        name: '<italic:false><#38D9FF><bold>SUPERVIVENCIA</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Construye, comercia y progresa.</#A8B3C7>'
-          - '<italic:false><#A8B3C7>Estado actual: <#F8FAFC>por confirmar</#F8FAFC></#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#55FF88>Clic para solicitar conexión</#55FF88>'
+          - '<italic:false><#A8B3C7>Construye, comercia y progresa</#A8B3C7>'
+          - '<italic:false><#A8B3C7>en un mundo persistente.</#A8B3C7>'
+          - '<italic:false><#A855F7><bold>INFORMACIÓN</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>RED  <#55FF88>AKARDOO</#55FF88></#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para conectarte</#38D9FF>'
         action: { type: connect, target: survival }
       - slot: 13
         material: OAK_SAPLING
         amount: 1
-        name: '<italic:false><#38D9FF><bold>◆ Skyblock</bold></#38D9FF>'
+        name: '<italic:false><#38D9FF><bold>SKYBLOCK</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Haz crecer una isla desde cero.</#A8B3C7>'
-          - '<italic:false><#A8B3C7>Estado actual: <#F8FAFC>por confirmar</#F8FAFC></#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#38D9FF>Clic para solicitar conexión</#38D9FF>'
+          - '<italic:false><#A8B3C7>Expande tu isla, crea granjas</#A8B3C7>'
+          - '<italic:false><#A8B3C7>y supera nuevos desafíos.</#A8B3C7>'
+          - '<italic:false><#A855F7><bold>INFORMACIÓN</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>RED  <#55FF88>AKARDOO</#55FF88></#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para conectarte</#38D9FF>'
         action: { type: connect, target: skyblock }
-      - slot: 16
-        material: SLIME_BALL
+      - slot: 15
+        material: DIAMOND_SWORD
         amount: 1
-        name: '<italic:false><#FFD166><bold>◆ Minijuegos</bold></#FFD166>'
+        name: '<italic:false><#38D9FF><bold>MINIJUEGOS</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Rondas rápidas para jugar en grupo.</#A8B3C7>'
-          - '<italic:false><#A8B3C7>Estado actual: <#F8FAFC>por confirmar</#F8FAFC></#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#FFD166>Clic para solicitar conexión</#FFD166>'
+          - '<italic:false><#A8B3C7>Compite en partidas rápidas</#A8B3C7>'
+          - '<italic:false><#A8B3C7>con amigos y rivales.</#A8B3C7>'
+          - '<italic:false><#A855F7><bold>INFORMACIÓN</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>RED  <#55FF88>AKARDOO</#55FF88></#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para conectarte</#38D9FF>'
         action: { type: connect, target: minigames }
-      - slot: 22
+      - slot: 31
         material: CLOCK
         amount: 1
-        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Cambiar de lobby</bold></gradient>'
+        name: '<italic:false><#38D9FF><bold>CAMBIAR DE LOBBY</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Abre el selector de puntos de encuentro.</#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para continuar</#F8FAFC>'
+          - '<italic:false><#A8B3C7>Busca otro punto de encuentro.</#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para abrir el selector</#38D9FF>'
         action: { type: menu, target: lobby-selector }
+
   - id: lobby-selector
-    rows: 3
-    title: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ LOBBIES ◆</bold></gradient>'
+    rows: 4
+    title: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SELECTOR DE LOBBIES ✦</bold></gradient>'
+    filler:
+      material: GRAY_STAINED_GLASS_PANE
+      amount: 1
+      name: '<italic:false><#303746> </#303746>'
+      lore: []
     slots:
       - slot: 4
         material: CLOCK
         amount: 1
-        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ Puntos de encuentro</bold></gradient>'
+        name: '<italic:false><#38D9FF><bold>AKARDOO NETWORK</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>La red resolverá cada solicitud.</#A8B3C7>'
-          - '<italic:false><#303746>•</#303746> <#F8FAFC>Capacidad actual: desconocida</#F8FAFC>'
+          - '<italic:false><#A855F7><bold>LOBBIES DISPONIBLES</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>Elige dónde reunirte.</#A8B3C7>'
+          - '<italic:false><#A8B3C7>Tu progreso permanece intacto.</#A8B3C7>'
         action: { type: none }
       - slot: 11
         material: SEA_LANTERN
         amount: 1
-        name: '<italic:false><#38D9FF><bold>◆ Lobby 1</bold></#38D9FF>'
+        name: '<italic:false><#38D9FF><bold>LOBBY 1</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Disponibilidad: <#F8FAFC>por confirmar</#F8FAFC></#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#38D9FF>Clic para solicitar conexión</#38D9FF>'
+          - '<italic:false><#A8B3C7>Lobby principal de la red.</#A8B3C7>'
+          - '<italic:false><#A855F7><bold>ESTADO</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>CONEXIÓN  <#55FF88>DISPONIBLE</#55FF88></#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para conectarte</#38D9FF>'
         action: { type: connect, target: lobby-1 }
       - slot: 13
         material: PRISMARINE_CRYSTALS
         amount: 1
-        name: '<italic:false><#38D9FF><bold>◆ Lobby 2</bold></#38D9FF>'
+        name: '<italic:false><#38D9FF><bold>LOBBY 2</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Disponibilidad: <#F8FAFC>por confirmar</#F8FAFC></#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#38D9FF>Clic para solicitar conexión</#38D9FF>'
+          - '<italic:false><#A8B3C7>Un punto de encuentro alternativo.</#A8B3C7>'
+          - '<italic:false><#A855F7><bold>ESTADO</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>CONEXIÓN  <#55FF88>DISPONIBLE</#55FF88></#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para conectarte</#38D9FF>'
         action: { type: connect, target: lobby-2 }
       - slot: 15
         material: HEART_OF_THE_SEA
         amount: 1
-        name: '<italic:false><#38D9FF><bold>◆ Lobby 3</bold></#38D9FF>'
+        name: '<italic:false><#38D9FF><bold>LOBBY 3</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Disponibilidad: <#F8FAFC>por confirmar</#F8FAFC></#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#38D9FF>Clic para solicitar conexión</#38D9FF>'
+          - '<italic:false><#A8B3C7>Un espacio tranquilo para reunirte.</#A8B3C7>'
+          - '<italic:false><#A855F7><bold>ESTADO</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>CONEXIÓN  <#55FF88>DISPONIBLE</#55FF88></#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para conectarte</#38D9FF>'
         action: { type: connect, target: lobby-3 }
-      - slot: 22
+      - slot: 31
         material: COMPASS
         amount: 1
-        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Volver a juegos</bold></gradient>'
+        name: '<italic:false><#38D9FF><bold>MODOS DE JUEGO</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Regresa al selector de modalidades.</#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para continuar</#F8FAFC>'
+          - '<italic:false><#A8B3C7>Regresa al catálogo de modalidades.</#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para abrir el selector</#38D9FF>'
         action: { type: menu, target: game-selector }
+
   - id: profile
-    rows: 3
-    title: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ TU PERFIL ◆</bold></gradient>'
+    rows: 4
+    title: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ PERFIL ✦</bold></gradient>'
+    filler:
+      material: GRAY_STAINED_GLASS_PANE
+      amount: 1
+      name: '<italic:false><#303746> </#303746>'
+      lore: []
     slots:
       - slot: 4
         material: PLAYER_HEAD
         amount: 1
-        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ Resumen personal</bold></gradient>'
+        name: '<italic:false><#38D9FF><bold>TU PERFIL</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Tu información se muestra en el marcador.</#A8B3C7>'
-          - '<italic:false><#303746>•</#303746> <#F8FAFC>Datos actualizados por el lobby</#F8FAFC>'
+          - '<italic:false><#A855F7><bold>RESUMEN PERSONAL</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>Consulta tus datos actuales</#A8B3C7>'
+          - '<italic:false><#A8B3C7>dentro de Akardoo Network.</#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para mostrar el resumen</#38D9FF>'
         action: { type: title, target: perfil }
       - slot: 10
         material: NAME_TAG
         amount: 1
-        name: '<italic:false><#38D9FF><bold>◆ Identidad</bold></#38D9FF>'
+        name: '<italic:false><#38D9FF><bold>IDENTIDAD</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Consulta tu nombre en el marcador lateral.</#A8B3C7>'
+          - '<italic:false><#A855F7><bold>JUGADOR</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>Tu nombre aparece en el</#A8B3C7>'
+          - '<italic:false><#A8B3C7>marcador lateral.</#A8B3C7>'
         action: { type: none }
       - slot: 12
         material: GRASS_BLOCK
         amount: 1
-        name: '<italic:false><#38D9FF><bold>◆ Ubicación</bold></#38D9FF>'
+        name: '<italic:false><#38D9FF><bold>UBICACIÓN</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Mundo y coordenadas aparecen en el marcador.</#A8B3C7>'
+          - '<italic:false><#A855F7><bold>POSICIÓN ACTUAL</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>Consulta mundo y coordenadas</#A8B3C7>'
+          - '<italic:false><#A8B3C7>en el marcador lateral.</#A8B3C7>'
         action: { type: none }
       - slot: 14
         material: CLOCK
         amount: 1
-        name: '<italic:false><#38D9FF><bold>◆ Conexión</bold></#38D9FF>'
+        name: '<italic:false><#38D9FF><bold>CONEXIÓN</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Tu latencia actual aparece en el marcador.</#A8B3C7>'
+          - '<italic:false><#A855F7><bold>LATENCIA</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>Tu ping se actualiza</#A8B3C7>'
+          - '<italic:false><#A8B3C7>automáticamente.</#A8B3C7>'
         action: { type: none }
       - slot: 16
+        material: EMERALD
+        amount: 1
+        name: '<italic:false><#38D9FF><bold>RED</bold></#38D9FF>'
+        lore:
+          - '<italic:false><#A855F7><bold>AKARDOO NETWORK</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>Dirección  <#FFD166>mc.akardoo.com</#FFD166></#A8B3C7>'
+        action: { type: none }
+      - slot: 22
         material: SPYGLASS
         amount: 1
-        name: '<italic:false><#38D9FF><bold>◆ Visibilidad</bold></#38D9FF>'
+        name: '<italic:false><#38D9FF><bold>VISIBILIDAD</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Revisa tu modo activo en el marcador.</#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para alternarlo</#F8FAFC>'
+          - '<italic:false><#A8B3C7>Alterna quién aparece</#A8B3C7>'
+          - '<italic:false><#A8B3C7>a tu alrededor.</#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para cambiar el modo</#38D9FF>'
         action: { type: visibility, target: cycle }
-      - slot: 22
+      - slot: 31
         material: ENDER_PEARL
         amount: 1
-        name: '<italic:false><#55FF88><bold>◆ Volver al inicio</bold></#55FF88>'
+        name: '<italic:false><#38D9FF><bold>VOLVER AL INICIO</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Regresa al punto de aparición configurado.</#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#55FF88>Clic para volver</#55FF88>'
+          - '<italic:false><#A8B3C7>Regresa al punto de aparición.</#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para volver</#38D9FF>'
         action: { type: spawn }
+
   - id: settings
-    rows: 3
-    title: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ AJUSTES ◆</bold></gradient>'
+    rows: 4
+    title: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ AJUSTES ✦</bold></gradient>'
+    filler:
+      material: GRAY_STAINED_GLASS_PANE
+      amount: 1
+      name: '<italic:false><#303746> </#303746>'
+      lore: []
     slots:
       - slot: 4
         material: COMPARATOR
         amount: 1
-        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ Preferencias del lobby</bold></gradient>'
+        name: '<italic:false><#38D9FF><bold>PREFERENCIAS</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Elige cómo quieres ver a los demás.</#A8B3C7>'
+          - '<italic:false><#A855F7><bold>EXPERIENCIA DEL LOBBY</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>Personaliza visibilidad</#A8B3C7>'
+          - '<italic:false><#A8B3C7>y prueba efectos visuales.</#A8B3C7>'
         action: { type: none }
       - slot: 10
         material: LIME_DYE
         amount: 1
-        name: '<italic:false><#55FF88><bold>◆ Ver a todos</bold></#55FF88>'
+        name: '<italic:false><#38D9FF><bold>VER A TODOS</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Muestra a todos los jugadores del lobby.</#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#55FF88>Clic para aplicar</#55FF88>'
+          - '<italic:false><#A8B3C7>Muestra a todos los jugadores.</#A8B3C7>'
+          - '<italic:false><#A855F7><bold>VISIBILIDAD</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>MODO  <#55FF88>TODOS</#55FF88></#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para aplicar</#38D9FF>'
         action: { type: visibility, target: all }
-      - slot: 12
+      - slot: 13
         material: YELLOW_DYE
         amount: 1
-        name: '<italic:false><#FFD166><bold>◆ Ver al personal</bold></#FFD166>'
+        name: '<italic:false><#38D9FF><bold>VER AL EQUIPO</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Muestra únicamente al equipo autorizado.</#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#FFD166>Clic para aplicar</#FFD166>'
+          - '<italic:false><#A8B3C7>Muestra solo al personal autorizado.</#A8B3C7>'
+          - '<italic:false><#A855F7><bold>VISIBILIDAD</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>MODO  <#FFD166>EQUIPO</#FFD166></#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para aplicar</#38D9FF>'
         action: { type: visibility, target: staff }
-      - slot: 14
+      - slot: 16
         material: GRAY_DYE
         amount: 1
-        name: '<italic:false><#A8B3C7><bold>◆ Ocultar jugadores</bold></#A8B3C7>'
+        name: '<italic:false><#38D9FF><bold>OCULTAR JUGADORES</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Oculta a los demás jugadores del lobby.</#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para aplicar</#F8FAFC>'
+          - '<italic:false><#A8B3C7>Oculta a los demás jugadores.</#A8B3C7>'
+          - '<italic:false><#A855F7><bold>VISIBILIDAD</bold></#A855F7>'
+          - '<italic:false><#A8B3C7>MODO  <#FFD166>OCULTO</#FFD166></#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para aplicar</#38D9FF>'
         action: { type: visibility, target: none }
-      - slot: 16
+      - slot: 20
         material: AMETHYST_SHARD
         amount: 1
-        name: '<italic:false><#38D9FF><bold>◆ Probar sonido</bold></#38D9FF>'
+        name: '<italic:false><#38D9FF><bold>SONIDO</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Reproduce una confirmación breve.</#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#38D9FF>Clic para escuchar</#38D9FF>'
+          - '<italic:false><#A8B3C7>Reproduce el sonido de confirmación.</#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para escuchar</#38D9FF>'
         action: { type: sound, target: clic }
-      - slot: 20
-        material: FIREWORK_STAR
-        amount: 1
-        name: '<italic:false><#38D9FF><bold>◆ Probar partículas</bold></#38D9FF>'
-        lore:
-          - '<italic:false><#A8B3C7>Muestra un destello a tu alrededor.</#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#38D9FF>Clic para mostrar</#38D9FF>'
-        action: { type: particle, target: destello }
       - slot: 22
         material: EXPERIENCE_BOTTLE
         amount: 1
-        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Ver resumen</bold></gradient>'
+        name: '<italic:false><#38D9FF><bold>RESUMEN</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Muestra una tarjeta breve en pantalla.</#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para mostrar</#F8FAFC>'
+          - '<italic:false><#A8B3C7>Muestra tu tarjeta personal.</#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para mostrar</#38D9FF>'
         action: { type: title, target: perfil }
       - slot: 24
-        material: ENDER_PEARL
+        material: FIREWORK_STAR
         amount: 1
-        name: '<italic:false><#55FF88><bold>◆ Volver al inicio</bold></#55FF88>'
+        name: '<italic:false><#38D9FF><bold>PARTÍCULAS</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Regresa al punto de aparición configurado.</#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#55FF88>Clic para volver</#55FF88>'
-        action: { type: spawn }
-      - slot: 26
+          - '<italic:false><#A8B3C7>Muestra un destello a tu alrededor.</#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para mostrar</#38D9FF>'
+        action: { type: particle, target: destello }
+      - slot: 27
         material: COMPASS
         amount: 1
-        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Selector de juegos</bold></gradient>'
+        name: '<italic:false><#38D9FF><bold>MODOS DE JUEGO</bold></#38D9FF>'
         lore:
-          - '<italic:false><#A8B3C7>Abre el catálogo de modalidades.</#A8B3C7>'
-          - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para continuar</#F8FAFC>'
+          - '<italic:false><#A8B3C7>Explora las modalidades de la red.</#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para abrir el selector</#38D9FF>'
         action: { type: menu, target: game-selector }
+      - slot: 31
+        material: ENDER_PEARL
+        amount: 1
+        name: '<italic:false><#38D9FF><bold>VOLVER AL INICIO</bold></#38D9FF>'
+        lore:
+          - '<italic:false><#A8B3C7>Regresa al punto de aparición.</#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para volver</#38D9FF>'
+        action: { type: spawn }
+      - slot: 35
+        material: PLAYER_HEAD
+        amount: 1
+        name: '<italic:false><#38D9FF><bold>PERFIL</bold></#38D9FF>'
+        lore:
+          - '<italic:false><#A8B3C7>Consulta tu resumen personal.</#A8B3C7>'
+          - '<italic:false><#303746> </#303746>'
+          - '<italic:false><#38D9FF>Click para abrir tu perfil</#38D9FF>'
+        action: { type: menu, target: profile }

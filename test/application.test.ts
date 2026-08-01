@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { ShaLobbyApplication } from '../src/application.js';
+import { ShaLobbyHandler } from '../src/handlers/sha-lobby-handler.js';
 import {
   MANAGED_LOBBY_FILES,
   ManagedLobbyClient,
@@ -10,8 +10,8 @@ import {
   type ManagedLobbyResult,
   type ManagedLobbySuccess,
   type ManagedLobbyTransport,
-} from '../src/managed-lobby.js';
-import { MessageCatalog, MessageConfigurationError } from '../src/messages.js';
+} from '../src/api/managed-lobby.js';
+import { MessageCatalog, MessageConfigurationError } from '../src/messages/message-catalog.js';
 
 function success(
   state: string,
@@ -63,7 +63,7 @@ describe('ShaLobby startup and reload', () => {
         { portals: 2 },
       );
     }, calls);
-    const application = new ShaLobbyApplication(new ManagedLobbyClient(transport));
+    const application = new ShaLobbyHandler(new ManagedLobbyClient(transport));
 
     const result = await application.start();
 
@@ -85,7 +85,7 @@ describe('ShaLobby startup and reload', () => {
       }
       return ensured();
     }, calls);
-    const application = new ShaLobbyApplication(new ManagedLobbyClient(transport), messages);
+    const application = new ShaLobbyHandler(new ManagedLobbyClient(transport), messages);
 
     await expect(application.start()).rejects.toBeInstanceOf(ManagedLobbyHostError);
     expect(calls).toEqual([{ operation: 'ensure' }, { operation: 'reload' }]);
@@ -118,7 +118,7 @@ describe('ShaLobby startup and reload', () => {
         (request) => (request.operation === 'ensure' ? ensured() : reloadResult),
         calls,
       );
-      const application = new ShaLobbyApplication(new ManagedLobbyClient(transport), messages);
+      const application = new ShaLobbyHandler(new ManagedLobbyClient(transport), messages);
 
       await expect(application.start()).rejects.toBeInstanceOf(errorType);
       expect(calls).toEqual([{ operation: 'ensure' }, { operation: 'reload' }]);
@@ -145,7 +145,7 @@ describe('ShaLobby startup and reload', () => {
       }
       return ensured();
     };
-    const application = new ShaLobbyApplication(new ManagedLobbyClient(transport));
+    const application = new ShaLobbyHandler(new ManagedLobbyClient(transport));
 
     const first = application.reload();
     const second = application.reload();
@@ -161,7 +161,7 @@ describe('ShaLobby startup and reload', () => {
 
   it('owns runtime shutdown and clears the accepted state', async () => {
     const shutdown = vi.fn(() => Promise.resolve());
-    const application = new ShaLobbyApplication(
+    const application = new ShaLobbyHandler(
       new ManagedLobbyClient((request) =>
         Promise.resolve(request.operation === 'ensure' ? ensured() : reloaded('messages: {}\n')),
       ),
@@ -183,7 +183,7 @@ describe('ShaLobby startup and reload', () => {
       finishReload = resolve;
     });
     const shutdown = vi.fn(() => Promise.resolve());
-    const application = new ShaLobbyApplication(
+    const application = new ShaLobbyHandler(
       new ManagedLobbyClient(async (request) => {
         if (request.operation === 'reload') await reloadPending;
         return request.operation === 'ensure' ? ensured() : reloaded('messages: {}\n');

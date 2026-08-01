@@ -1,5 +1,12 @@
 import { JAVA_TYPES, paperJava, runOutsidePaperFrame, type PaperHandle } from '@shamoo/paper-raw';
 
+import type {
+  ActiveLobbyConfiguration,
+  LobbyConfigurationSource,
+} from '../../api/configuration-provider.js';
+import type { PortalManager } from '../../managers/portal-manager.js';
+import type { PortalSessionManager } from '../../managers/portal-session-manager.js';
+import type { VisibilityManager } from '../../managers/visibility-manager.js';
 import {
   Bukkit,
   cancelEvent,
@@ -17,23 +24,20 @@ import {
   staticExact,
   type Ref,
 } from './api.js';
-import {
-  LOBBY_FILES,
-  LobbyConfigurationStore,
-  type LobbyAction,
-  type LobbyConfiguration,
-  type LobbyItem,
-  type LobbyMenu,
-  type LobbyPortal,
-  type Visibility,
-} from './configuration.js';
-import { normalizePortalSelection, selectPortal, type LobbyPosition } from './domain/portals.js';
+import type { LobbyAction } from '../../configuration/actions.js';
+import { LOBBY_FILES } from '../../configuration/files.js';
+import type { LobbyItem } from '../../configuration/items.js';
+import type { LobbyConfiguration } from '../../configuration/lobby-configuration.js';
+import type { LobbyMenu } from '../../configuration/menus.js';
+import type { LobbyPortal } from '../../configuration/portals.js';
+import type { Visibility } from '../../configuration/settings.js';
+import type { LobbyPosition } from '../../managers/portal-rules.js';
 import type {
   ManagedLobbyExecuteAction,
   ManagedLobbyData,
   ManagedLobbyRequest,
   ManagedLobbyResult,
-} from './managed-lobby.js';
+} from '../../api/managed-lobby.js';
 
 function data(value: unknown): ManagedLobbyData {
   return value as ManagedLobbyData;
@@ -159,18 +163,18 @@ function isRetiredEntityFailure(error: unknown): boolean {
 
 class LobbyOverloadedError extends Error {}
 
-export class ShaLobbyRuntime {
-  readonly #store = new LobbyConfigurationStore();
+export class PaperLobbyHandler {
+  readonly #configurationSource: LobbyConfigurationSource;
+  readonly #activeConfiguration: ActiveLobbyConfiguration;
+  readonly #portals: PortalManager;
+  readonly #portalSessions: PortalSessionManager;
   readonly #generation = generationId();
   readonly #deferredTasks = new Set<PaperHandle>();
   readonly #itemCooldowns = new Map<string, number>();
   readonly #initializedPlayers = new Set<string>();
   readonly #menuSessions = new Map<string, MenuSession>();
-  readonly #occupiedPortals = new Map<string, string>();
   readonly #pendingJoins = new Map<string, Ref<'org.bukkit.entity.Player'>>();
   readonly #pendingMoves = new Map<string, MovementMailbox>();
-  readonly #portalCooldowns = new Map<string, number>();
-  readonly #portalSelections = new Map<string, { first?: LobbyPosition; second?: LobbyPosition }>();
   readonly #pendingActions = new Set<Promise<void>>();
   readonly #inactiveSidebars = new Set<string>();
   readonly #inactiveSidebarPlayers = new Map<string, string>();
@@ -182,10 +186,10 @@ export class ShaLobbyRuntime {
   readonly #sidebarSessions = new Map<string, SidebarSession>();
   readonly #sidebarUpdates = new Map<string, Promise<void>>();
   readonly #transferCooldowns = new Map<string, number>();
-  readonly #visibility = new Map<string, Visibility>();
-  readonly #visualizers = new Set<string>();
-  #configuration: LobbyConfiguration | undefined;
+  readonly #visibility: VisibilityManager;
   #closed = false;
+  #closePromise: Promise<void> | undefined;
+  #closing = false;
   readonly #bossBars = new Map<string, PlayerBossBar>();
   #enforcementActive = false;
   #itemKey: PaperHandle | undefined;
@@ -203,13 +207,27 @@ export class ShaLobbyRuntime {
   #sidebarRefreshActive = false;
   #tasks: PaperHandle[] = [];
 
+  public constructor(
+    configurationSource: LobbyConfigurationSource,
+    activeConfiguration: ActiveLobbyConfiguration,
+    portals: PortalManager,
+    portalSessions: PortalSessionManager,
+    visibility: VisibilityManager,
+  ) {
+    this.#configurationSource = configurationSource;
+    this.#activeConfiguration = activeConfiguration;
+    this.#portals = portals;
+    this.#portalSessions = portalSessions;
+    this.#visibility = visibility;
+  }
+
   public get configuration(): LobbyConfiguration {
-    if (this.#configuration === undefined) throw new Error('ShaLobby configuration is not loaded.');
-    return this.#configuration;
+    return this.#activeConfiguration.require();
   }
 
   public async request(request: ManagedLobbyRequest): Promise<ManagedLobbyResult> {
     try {
+      if (this.#closing && request.operation !== 'status') throw new Error('ShaLobby is closing.');
       if (request.operation === 'ensure')
         return {
           ok: true,
@@ -236,12 +254,12 @@ export class ShaLobbyRuntime {
 
   public async reload(): Promise<ManagedLobbyResult & { readonly ok: true }> {
     if (this.#closed) throw new Error('ShaLobby is closed.');
-    const candidate = await this.#store.load();
+    const candidate = await this.#configurationSource.load();
     await this.preflight(candidate);
     const previousWorldSettings = await this.captureWorldSettings(candidate);
-    const previous = this.#configuration;
+    const previous = this.#activeConfiguration.current();
     const previousInitializedPlayers = new Set(this.#initializedPlayers);
-    const previousVisibility = new Map(this.#visibility);
+    const previousVisibility = this.#visibility.snapshot();
     this.#reloading = true;
     this.#revision++;
     let preparedPresentation: PreparedPresentation | undefined;
@@ -250,7 +268,7 @@ export class ShaLobbyRuntime {
       await this.stopPendingMoves();
       await this.stopDeferredTasks();
       await this.awaitPendingActions();
-      this.#configuration = candidate;
+      this.#activeConfiguration.replace(candidate);
       await this.initializeKeys();
       await this.applyWorldSettings();
       await this.registerMessaging();
@@ -261,12 +279,12 @@ export class ShaLobbyRuntime {
         const id = await playerUniqueId(online);
         if (await this.isManagedPlayer(online)) {
           this.activateSidebar(online, id);
-          this.#visibility.set(id, this.configuration.settings.visibility.default);
+          this.#visibility.activate(id);
           await this.giveItems(online);
           await this.updateSidebar(online, onlinePlayersNow.length);
           await this.applyVisibility(online);
         } else {
-          this.#visibility.delete(id);
+          this.#visibility.remove(id);
           await this.removeManagedItems(online);
           for (const other of onlinePlayersNow)
             if (!paperJava.same(online, other)) await call(online, 'showPlayer', plugin, other);
@@ -317,11 +335,10 @@ export class ShaLobbyRuntime {
       } catch (rollbackError: unknown) {
         rollbackFailures.push(rollbackError);
       }
-      this.#configuration = previous;
+      this.#activeConfiguration.replace(previous);
       this.#initializedPlayers.clear();
       for (const id of previousInitializedPlayers) this.#initializedPlayers.add(id);
-      this.#visibility.clear();
-      for (const [id, visibility] of previousVisibility) this.#visibility.set(id, visibility);
+      this.#visibility.restore(previousVisibility);
       if (previous !== undefined) {
         try {
           onlinePlayersNow = await onlinePlayers();
@@ -338,7 +355,7 @@ export class ShaLobbyRuntime {
               await this.applyVisibility(online);
             } else {
               const id = await playerUniqueId(online);
-              this.#visibility.delete(id);
+              this.#visibility.remove(id);
               await this.removeManagedItems(online);
               for (const other of onlinePlayersNow)
                 if (!paperJava.same(online, other)) await call(online, 'showPlayer', plugin, other);
@@ -385,7 +402,14 @@ export class ShaLobbyRuntime {
     };
   }
 
-  public async close(): Promise<void> {
+  public close(): Promise<void> {
+    if (this.#closePromise !== undefined) return this.#closePromise;
+    this.#closing = true;
+    this.#closePromise = this.#mutationQueue.then(() => this.closeNow());
+    return this.#closePromise;
+  }
+
+  private async closeNow(): Promise<void> {
     if (this.#closed) return;
     const runtime = await paperJava.describe();
     const replacementPresent = runtime['replacementPresent'] === true;
@@ -542,17 +566,14 @@ export class ShaLobbyRuntime {
     this.#presentationRefreshTick = undefined;
     this.#itemCooldowns.clear();
     this.#initializedPlayers.clear();
-    this.#portalCooldowns.clear();
-    this.#occupiedPortals.clear();
+    this.#portalSessions.clear();
     this.#pendingJoins.clear();
     this.#pendingMoves.clear();
-    this.#portalSelections.clear();
     this.#transferCooldowns.clear();
     this.#visibility.clear();
-    this.#visualizers.clear();
     this.#itemKey = undefined;
     this.#persistentString = undefined;
-    this.#configuration = undefined;
+    this.#activeConfiguration.replace(undefined);
   }
 
   private activateSidebar(current: Ref<'org.bukkit.entity.Player'>, id: string): void {
@@ -584,7 +605,7 @@ export class ShaLobbyRuntime {
   private async initializeJoinedPlayer(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
     const id = await playerUniqueId(current);
     this.activateSidebar(current, id);
-    this.#visibility.set(id, this.configuration.settings.visibility.default);
+    this.#visibility.activate(id);
     const teleport =
       this.configuration.settings.join.teleport && this.configuration.spawn.configured
         ? this.teleportToSpawn(current)
@@ -707,10 +728,8 @@ export class ShaLobbyRuntime {
     this.#pendingJoins.delete(id);
     const menu = this.#menuSessions.get(id);
     this.#menuSessions.delete(id);
-    this.#visibility.delete(id);
-    this.#portalSelections.delete(id);
-    this.#occupiedPortals.delete(id);
-    this.#visualizers.delete(id);
+    this.#visibility.remove(id);
+    this.#portalSessions.clearPlayer(id);
     const sidebarUpdate = this.#sidebarUpdates.get(sidebarKey);
     const existingSidebar = this.#sidebarSessions.get(id);
     const sidebar =
@@ -932,7 +951,7 @@ export class ShaLobbyRuntime {
     const destinationManaged = destination !== null && (await this.isManagedLocation(destination));
     if (!this.isMovementCurrent(mailbox, version)) return;
     if (!destinationManaged) {
-      this.#occupiedPortals.delete(id);
+      this.#portalSessions.leave(id);
       if (this.#visibility.has(id)) await this.leaveManagedPlayer(current);
       return;
     }
@@ -940,7 +959,7 @@ export class ShaLobbyRuntime {
     if (!this.isMovementCurrent(mailbox, version)) return;
     if (!sourceManaged) {
       this.activateSidebar(current, id);
-      this.#visibility.set(id, this.configuration.settings.visibility.default);
+      this.#visibility.activate(id);
       await this.giveItems(current);
       await this.updateSidebar(current);
       await this.applyPlayerPresentation(current, undefined, false, id);
@@ -960,12 +979,11 @@ export class ShaLobbyRuntime {
     const portal = await this.portalAt(destination);
     if (!this.isMovementCurrent(mailbox, version)) return;
     if (portal === undefined) {
-      this.#occupiedPortals.delete(id);
+      this.#portalSessions.leave(id);
       return;
     }
-    if (this.#occupiedPortals.get(id) === portal.id) return;
     const now = Date.now();
-    if ((this.#portalCooldowns.get(`${id}:${portal.id}`) ?? 0) > now) return;
+    if (!this.#portalSessions.canEnter(id, portal, now)) return;
     if (
       portal.permission !== undefined &&
       !(await call<boolean>(current, 'hasPermission', portal.permission))
@@ -990,12 +1008,9 @@ export class ShaLobbyRuntime {
     )
       return;
     if (!this.isMovementCurrent(mailbox, version)) return;
-    this.#occupiedPortals.set(id, currentPortal.id);
+    this.#portalSessions.occupy(id, currentPortal.id);
     await this.executeAction(current, currentPortal.action);
-    this.#portalCooldowns.set(
-      `${id}:${currentPortal.id}`,
-      Date.now() + currentPortal['cooldown-ms'],
-    );
+    this.#portalSessions.startCooldown(id, currentPortal, Date.now());
   }
 
   public async interact(event: PaperHandle): Promise<void> {
@@ -1087,13 +1102,14 @@ export class ShaLobbyRuntime {
   }
 
   private status(): ManagedLobbyResult {
-    const configuration = this.#configuration;
+    const configuration = this.#activeConfiguration.current();
+    const active = configuration !== undefined && !this.#closed && !this.#closing;
     return {
       ok: true,
-      state: this.#closed ? 'closed' : configuration === undefined ? 'uninitialized' : 'ready',
+      state: configuration === undefined ? 'uninitialized' : active ? 'ready' : 'standby',
       generation: this.#generation,
-      active: configuration !== undefined && !this.#closed,
-      invocationAdmissionOpen: !this.#closed,
+      active,
+      invocationAdmissionOpen: !this.#closed && !this.#closing,
       pendingActions: this.#pendingMutations,
       maximumPendingActions: 256,
       directory: 'data',
@@ -1142,12 +1158,12 @@ export class ShaLobbyRuntime {
       return {
         ok: true,
         state: 'portal-list',
-        portals: data(this.configuration.portals),
-        count: this.configuration.portals.length,
-        message: `Portales configurados: ${String(this.configuration.portals.length)}.`,
+        portals: data(this.#portals.all()),
+        count: this.#portals.all().length,
+        message: `Portales configurados: ${String(this.#portals.all().length)}.`,
       };
     if (action.action === 'portal-info') {
-      const portal = this.portal(action.id);
+      const portal = this.#portals.get(action.id);
       return {
         ok: true,
         state: 'portal-info',
@@ -1156,8 +1172,7 @@ export class ShaLobbyRuntime {
       };
     }
     if (action.action === 'portal-visualize') {
-      if (action.enabled) this.#visualizers.add(action.player);
-      else this.#visualizers.delete(action.player);
+      this.#portalSessions.setVisualization(action.player, action.enabled);
       return {
         ok: true,
         state: 'portal-visualization-updated',
@@ -1203,38 +1218,7 @@ export class ShaLobbyRuntime {
     >,
   ): Promise<ManagedLobbyResult> {
     if (action.action === 'portal-create') {
-      const selection = normalizePortalSelection(this.#portalSelections.get(action.player) ?? {});
-      if (!selection.ok && selection.reason === 'incomplete')
-        throw new Error('Selecciona las dos posiciones antes de crear el portal.');
-      if (!selection.ok)
-        throw new Error('Las posiciones del portal deben estar en el mismo mundo.');
-      if (this.configuration.portals.some((portal) => portal.id === action.id))
-        throw new Error(`El portal ${action.id} ya existe.`);
-      if (
-        action.destination !== undefined &&
-        !this.configuration.servers.some(
-          (server) => server.id === action.destination && server.enabled,
-        )
-      )
-        throw new Error(`El servidor ${action.destination} no está disponible.`);
-      const portal: LobbyPortal = {
-        id: action.id,
-        enabled: action.enabled ?? true,
-        world: selection.world,
-        min: selection.min,
-        max: selection.max,
-        ...(action.permission === undefined ? {} : { permission: action.permission }),
-        priority: action.priority ?? 0,
-        'cooldown-ms': action['cooldown-ms'] ?? this.configuration.settings['portal-cooldown-ms'],
-        ...(action.destination === undefined ? {} : { destination: action.destination }),
-        action:
-          action.destination === undefined
-            ? { type: 'none' }
-            : { type: 'connect', target: action.destination },
-        visualize: action.visualize ?? false,
-      };
-      await this.#store.writePortals([...this.configuration.portals, portal]);
-      this.configuration.portals.push(portal);
+      const portal = await this.#portals.create(action.player, action);
       return {
         ok: true,
         state: 'portal-created',
@@ -1242,11 +1226,8 @@ export class ShaLobbyRuntime {
         message: `Portal ${portal.id} creado.`,
       };
     }
-    const portal = this.portal(action.id);
     if (action.action === 'portal-remove') {
-      const next = this.configuration.portals.filter((candidate) => candidate !== portal);
-      await this.#store.writePortals(next);
-      this.configuration.portals.splice(this.configuration.portals.indexOf(portal), 1);
+      const portal = await this.#portals.remove(action.id);
       return {
         ok: true,
         state: 'portal-removed',
@@ -1254,42 +1235,25 @@ export class ShaLobbyRuntime {
         message: `Portal ${portal.id} eliminado.`,
       };
     }
-    const updated: LobbyPortal = {
-      ...portal,
-      min: { ...portal.min },
-      max: { ...portal.max },
-      action: { ...portal.action },
-    };
-    if (action.action === 'portal-enable') updated.enabled = true;
-    else if (action.action === 'portal-disable') updated.enabled = false;
-    else if (action.type === 'spawn') {
-      updated.action = { type: 'spawn' };
-      delete updated.destination;
-    } else if (action.type === 'server') {
-      if (
-        !this.configuration.servers.some((server) => server.id === action.target && server.enabled)
-      )
-        throw new Error(`El servidor ${action.target} no está disponible.`);
-      updated.action = { type: 'connect', target: action.target };
-      updated.destination = action.target;
-    } else {
-      if (!this.configuration.menus.some((menu) => menu.id === action.target))
-        throw new Error(`El menú ${action.target} no existe.`);
-      updated.action = { type: 'menu', target: action.target };
-      delete updated.destination;
+    if (action.action === 'portal-enable' || action.action === 'portal-disable') {
+      const portal = await this.#portals.setEnabled(action.id, action.action === 'portal-enable');
+      return {
+        ok: true,
+        state: action.action === 'portal-enable' ? 'portal-enabled' : 'portal-disabled',
+        portal: data(portal),
+        message: `Portal ${portal.id} actualizado.`,
+      };
     }
-    const next = this.configuration.portals.map((candidate) =>
-      candidate === portal ? updated : candidate,
+    const portal = await this.#portals.setDestination(
+      action.id,
+      action.type === 'spawn' ? { type: 'spawn' } : { type: action.type, target: action.target },
     );
-    await this.#store.writePortals(next);
-    Object.assign(portal, updated);
-    const state =
-      action.action === 'portal-enable'
-        ? 'portal-enabled'
-        : action.action === 'portal-disable'
-          ? 'portal-disabled'
-          : 'portal-destination';
-    return { ok: true, state, portal: data(portal), message: `Portal ${portal.id} actualizado.` };
+    return {
+      ok: true,
+      state: 'portal-destination',
+      portal: data(portal),
+      message: `Portal ${portal.id} actualizado.`,
+    };
   }
 
   private async setSpawn(id: string): Promise<ManagedLobbyResult> {
@@ -1312,7 +1276,7 @@ export class ShaLobbyRuntime {
         call<number>(location, 'getPitch'),
       ]);
       const spawn = { configured: true, world: worldName, x, y, z, yaw, pitch };
-      await this.#store.writeSpawn(spawn);
+      await this.#configurationSource.writeSpawn(spawn);
       Object.assign(this.configuration.spawn, spawn);
       return {
         ok: true,
@@ -1586,10 +1550,8 @@ export class ShaLobbyRuntime {
       }
     }
     for (const target of await onlinePlayers()) await call(current, 'showPlayer', plugin, target);
-    this.#visibility.delete(id);
-    this.#occupiedPortals.delete(id);
-    this.#portalSelections.delete(id);
-    this.#visualizers.delete(id);
+    this.#visibility.remove(id);
+    this.#portalSessions.clearPlayer(id);
   }
 
   private async givePortalWand(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
@@ -1655,9 +1617,18 @@ export class ShaLobbyRuntime {
   }
 
   private async createMenu(menu: LobbyMenu): Promise<PreparedMenu> {
+    const occupied = new Set(menu.slots.map((item) => item.slot));
+    const filler = menu.filler;
+    const fillerDefinitions: LobbyItem[] =
+      filler === undefined
+        ? []
+        : Array.from({ length: menu.rows * 9 }, (_, slot) => slot)
+            .filter((slot) => !occupied.has(slot))
+            .map((slot) => ({ ...filler, slot, action: { type: 'none' } }));
+    const definitions = [...menu.slots, ...fillerDefinitions];
     const prepared = await Promise.allSettled([
       component(menu.title),
-      ...menu.slots.map((definition) => this.createItem(definition, `menu:${menu.id}`)),
+      ...definitions.map((definition) => this.createItem(definition, `menu:${menu.id}`)),
     ]);
     const preparationFailures = rejectionReasons(prepared);
     if (preparationFailures.length > 0) {
@@ -1676,7 +1647,7 @@ export class ShaLobbyRuntime {
       return result.value;
     });
     const contents: (PaperHandle | null)[] = Array.from({ length: menu.rows * 9 }, () => null);
-    for (const [index, definition] of menu.slots.entries())
+    for (const [index, definition] of definitions.entries())
       contents[definition.slot] = items[index] ?? null;
     return { items: contents, menu, title };
   }
@@ -1747,9 +1718,7 @@ export class ShaLobbyRuntime {
     ];
     const titleIds = new Set([
       this.configuration.settings.join['welcome-title'],
-      ...actions.flatMap((action) =>
-        action.type === 'title' && action.target !== undefined ? [action.target] : [],
-      ),
+      ...actions.flatMap((action) => (action.type === 'title' ? [action.target] : [])),
     ]);
     const prepared: PreparedPresentation = { menus: new Map(), titles: new Map() };
     try {
@@ -2164,13 +2133,10 @@ export class ShaLobbyRuntime {
   ): Promise<void> {
     if (action.type === 'none') return;
     if (action.type === 'spawn') return this.teleportToSpawn(current);
-    if (action.type === 'menu' && action.target !== undefined)
-      return this.openMenu(current, action.target);
-    if (action.type === 'visibility')
-      return this.setVisibility(current, (action.target ?? 'all') as Visibility | 'cycle');
-    if (action.type === 'connect' && action.target !== undefined)
-      return this.connect(current, action.target);
-    if (action.type === 'sound' && action.target !== undefined) {
+    if (action.type === 'menu') return this.openMenu(current, action.target);
+    if (action.type === 'visibility') return this.setVisibility(current, action.target ?? 'all');
+    if (action.type === 'connect') return this.connect(current, action.target);
+    if (action.type === 'sound') {
       const sound = this.soundAsset(action.target);
       await callExact(
         current,
@@ -2183,31 +2149,29 @@ export class ShaLobbyRuntime {
       );
       return;
     }
-    if (action.type === 'title' && action.target !== undefined) {
+    if (action.type === 'title') {
       const title = this.#preparedTitles.get(action.target);
       if (title === undefined) throw new RangeError(`No existe el título ${action.target}.`);
       await callExact(current, 'showTitle', '(Lnet/kyori/adventure/title/Title;)V', title);
       return;
     }
-    if (action.type === 'particle' && action.target !== undefined) {
-      const asset = this.particleAsset(action.target);
-      await callExact(
+    const asset = this.particleAsset(action.target);
+    await callExact(
+      current,
+      'spawnParticle',
+      '(Lorg/bukkit/Particle;Lorg/bukkit/Location;IDDDD)V',
+      await constant('org.bukkit.Particle', asset.particle),
+      await callExact<Ref<'org.bukkit.Location'>>(
         current,
-        'spawnParticle',
-        '(Lorg/bukkit/Particle;Lorg/bukkit/Location;IDDDD)V',
-        await constant('org.bukkit.Particle', asset.particle),
-        await callExact<Ref<'org.bukkit.Location'>>(
-          current,
-          'getLocation',
-          '()Lorg/bukkit/Location;',
-        ),
-        asset.count,
-        asset['offset-x'],
-        asset['offset-y'],
-        asset['offset-z'],
-        asset.speed,
-      );
-    }
+        'getLocation',
+        '()Lorg/bukkit/Location;',
+      ),
+      asset.count,
+      asset['offset-x'],
+      asset['offset-y'],
+      asset['offset-z'],
+      asset.speed,
+    );
   }
 
   private async connect(current: Ref<'org.bukkit.entity.Player'>, id: string): Promise<void> {
@@ -2384,33 +2348,26 @@ export class ShaLobbyRuntime {
     requested: Visibility | 'cycle',
   ): Promise<void> {
     const id = await playerUniqueId(current);
-    const previous = this.#visibility.get(id) ?? this.configuration.settings.visibility.default;
-    const mode =
-      requested === 'cycle'
-        ? previous === 'all'
-          ? 'staff'
-          : previous === 'staff'
-            ? 'none'
-            : 'all'
-        : requested;
-    this.#visibility.set(id, mode);
+    this.#visibility.set(id, requested);
     await this.applyVisibility(current);
     await this.updateSidebar(current);
   }
 
   private async applyVisibility(current: Ref<'org.bukkit.entity.Player'>): Promise<void> {
     const id = await playerUniqueId(current);
-    const mode = this.#visibility.get(id) ?? this.configuration.settings.visibility.default;
+    const mode = this.#visibility.mode(id);
     for (const other of await onlinePlayers()) {
       if (paperJava.same(current, other)) continue;
-      const visible =
-        mode === 'all' ||
-        (mode === 'staff' &&
-          (await call<boolean>(
-            other,
-            'hasPermission',
-            this.configuration.settings.visibility['staff-permission'],
-          )));
+      const visible = this.#visibility.canSee(
+        id,
+        mode === 'staff'
+          ? await call<boolean>(
+              other,
+              'hasPermission',
+              this.configuration.settings.visibility['staff-permission'],
+            )
+          : false,
+      );
       await call(current, visible ? 'showPlayer' : 'hidePlayer', plugin, other);
     }
   }
@@ -2427,7 +2384,7 @@ export class ShaLobbyRuntime {
         this.configuration.settings.visibility['staff-permission'],
       ),
     ]);
-    const mode = this.#visibility.get(id) ?? this.configuration.settings.visibility.default;
+    const mode = this.#visibility.mode(id);
     const updated = await Promise.allSettled(
       online.map(async (other) => {
         if (paperJava.same(current, other)) return;
@@ -2441,8 +2398,6 @@ export class ShaLobbyRuntime {
               )
             : Promise.resolve(false),
         ]);
-        const otherMode =
-          this.#visibility.get(otherId) ?? this.configuration.settings.visibility.default;
         const relationships = await Promise.allSettled([
           call(
             current,
@@ -2452,9 +2407,7 @@ export class ShaLobbyRuntime {
           ),
           call(
             other,
-            otherMode === 'all' || (otherMode === 'staff' && currentIsStaff)
-              ? 'showPlayer'
-              : 'hidePlayer',
+            this.#visibility.canSee(otherId, currentIsStaff) ? 'showPlayer' : 'hidePlayer',
             plugin,
             current,
           ),
@@ -2528,22 +2481,13 @@ export class ShaLobbyRuntime {
       y: await call<number>(location, 'getBlockY'),
       z: await call<number>(location, 'getBlockZ'),
     };
-    const selection = this.#portalSelections.get(id) ?? {};
-    if (kind === 'portal-pos1') selection.first = position;
-    else selection.second = position;
-    this.#portalSelections.set(id, selection);
+    this.#portalSessions.setPosition(id, position, kind === 'portal-pos1' ? 1 : 2);
     return {
       ok: true,
       state: kind,
       position: data(position),
       message: `Posición guardada en ${position.world}.`,
     };
-  }
-
-  private portal(id: string): LobbyPortal {
-    const result = this.configuration.portals.find((portal) => portal.id === id);
-    if (result === undefined) throw new RangeError(`No existe el portal ${id}.`);
-    return result;
   }
 
   private async portalAt(location: Ref<'org.bukkit.Location'>): Promise<LobbyPortal | undefined> {
@@ -2557,7 +2501,7 @@ export class ShaLobbyRuntime {
     const x = await call<number>(location, 'getX');
     const y = await call<number>(location, 'getY');
     const z = await call<number>(location, 'getZ');
-    return selectPortal(this.configuration.portals, { world: name, x, y, z });
+    return this.#portals.at({ world: name, x, y, z });
   }
 
   private async applyWorldSettings(): Promise<void> {
@@ -2691,7 +2635,10 @@ export class ShaLobbyRuntime {
     for (const value of texts) await (await component(value)).$release();
     const materials = new Set([
       ...candidate.items.map((item) => item.material),
-      ...candidate.menus.flatMap((menu) => menu.slots.map((item) => item.material)),
+      ...candidate.menus.flatMap((menu) => [
+        ...menu.slots.map((item) => item.material),
+        ...(menu.filler === undefined ? [] : [menu.filler.material]),
+      ]),
       'BLAZE_ROD',
     ]);
     for (const material of materials) await constant('org.bukkit.Material', material);
@@ -3002,7 +2949,7 @@ export class ShaLobbyRuntime {
         y,
         z,
         ping,
-        visibility: this.#visibility.get(id) ?? this.configuration.settings.visibility.default,
+        visibility: this.#visibility.mode(id),
       };
     } finally {
       await world?.$release();
@@ -3297,12 +3244,14 @@ export class ShaLobbyRuntime {
     const id = await playerUniqueId(current);
     const world = await call<PaperHandle>(current, 'getWorld');
     const worldName = await call<string>(world, 'getName');
-    const portals = this.configuration.portals.filter(
-      (portal) =>
-        portal.world === worldName &&
-        portal.enabled &&
-        (portal.visualize || this.#visualizers.has(id)),
-    );
+    const portals = this.#portals
+      .all()
+      .filter(
+        (portal) =>
+          portal.world === worldName &&
+          portal.enabled &&
+          this.#portalSessions.shouldVisualize(id, portal),
+      );
     if (portals.length === 0) return;
     const particle = await constant('org.bukkit.Particle', 'END_ROD');
     for (const portal of portals)
@@ -3321,5 +3270,3 @@ export class ShaLobbyRuntime {
             );
   }
 }
-
-export const shaLobbyRuntime = new ShaLobbyRuntime();

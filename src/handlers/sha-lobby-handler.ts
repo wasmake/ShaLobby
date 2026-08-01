@@ -1,17 +1,12 @@
-import { OnDisable, OnEnable } from '@shamoo/lifecycle';
-import { Plugin } from '@shamoo/decorators';
+import type { ManagedLobbyClient, ManagedLobbyReloadSuccess } from '../api/managed-lobby.js';
+import { MessageCatalog } from '../messages/message-catalog.js';
 
-import { logError, logInfo, logStartupComplete } from './logging.js';
-import { ManagedLobbyClient, type ManagedLobbyReloadSuccess } from './managed-lobby.js';
-import { MessageCatalog } from './messages.js';
-import { shaLobbyRuntime } from './lobby.js';
-
-export interface ApplicationReloadResult {
+export interface HandlerReloadResult {
   readonly runtime: ManagedLobbyReloadSuccess;
   readonly messages: MessageCatalog;
 }
 
-export class ShaLobbyApplication {
+export class ShaLobbyHandler {
   public readonly messages: MessageCatalog;
   public readonly managedLobby: ManagedLobbyClient;
   #configurationAccepted = false;
@@ -21,11 +16,9 @@ export class ShaLobbyApplication {
   #stopping = false;
 
   public constructor(
-    managedLobby: ManagedLobbyClient = new ManagedLobbyClient((request) =>
-      shaLobbyRuntime.request(request),
-    ),
+    managedLobby: ManagedLobbyClient,
     messages: MessageCatalog = new MessageCatalog(),
-    shutdown: () => Promise<void> = () => shaLobbyRuntime.close(),
+    shutdown: () => Promise<void> = () => Promise.resolve(),
   ) {
     this.managedLobby = managedLobby;
     this.messages = messages;
@@ -36,7 +29,7 @@ export class ShaLobbyApplication {
     return this.#configurationAccepted;
   }
 
-  public async start(): Promise<ApplicationReloadResult> {
+  public async start(): Promise<HandlerReloadResult> {
     this.assertRunning();
     this.#configurationAccepted = false;
     await this.managedLobby.ensure();
@@ -46,7 +39,7 @@ export class ShaLobbyApplication {
     return result;
   }
 
-  public reload(): Promise<ApplicationReloadResult> {
+  public reload(): Promise<HandlerReloadResult> {
     if (this.#stopping) return Promise.reject(new Error('ShaLobby is stopping.'));
     const transaction = this.#reloadQueue.then(() => this.reloadTransaction());
     this.#reloadQueue = transaction.then(
@@ -69,7 +62,7 @@ export class ShaLobbyApplication {
     return transaction;
   }
 
-  private async reloadTransaction(): Promise<ApplicationReloadResult> {
+  private async reloadTransaction(): Promise<HandlerReloadResult> {
     const runtime = await this.managedLobby.reload();
     const candidate = new MessageCatalog();
     candidate.replace(runtime.messagesContent);
@@ -79,35 +72,5 @@ export class ShaLobbyApplication {
 
   private assertRunning(): void {
     if (this.#stopping) throw new Error('ShaLobby is stopping.');
-  }
-}
-
-export const shaLobbyApplication = new ShaLobbyApplication();
-
-@Plugin({ name: 'shalobby' })
-export class ShaLobbyPlugin {
-  @OnEnable()
-  public async enable(): Promise<void> {
-    const startedAt = performance.now();
-    try {
-      const result = await shaLobbyApplication.start();
-      const durationMs = performance.now() - startedAt;
-      logInfo('startup-configuration-accepted', {
-        state: result.runtime.state,
-        messagesLoaded: true,
-        paperApi: 'generated-public-bindings',
-        durationMs: Number(durationMs.toFixed(2)),
-      });
-      logStartupComplete(durationMs);
-    } catch (error: unknown) {
-      logError('startup-failed', error);
-      throw error;
-    }
-  }
-
-  @OnDisable()
-  public async disable(): Promise<void> {
-    await shaLobbyApplication.stop();
-    logInfo('shutdown-complete');
   }
 }

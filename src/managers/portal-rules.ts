@@ -1,4 +1,4 @@
-import type { LobbyPortal } from '../configuration.js';
+import type { LobbyPortal } from '../configuration/portals.js';
 
 export interface LobbyPosition {
   readonly world: string;

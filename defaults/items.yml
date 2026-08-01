@@ -3,49 +3,59 @@ items:
     slot: 0
     material: COMPASS
     amount: 1
-    name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Selector de juegos</bold></gradient>'
+    name: '<italic:false><#38D9FF><bold>MODOS DE JUEGO</bold></#38D9FF>'
     lore:
-      - '<italic:false><#A8B3C7>Explora las modalidades de la red.</#A8B3C7>'
-      - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para abrir</#F8FAFC>'
+      - '<italic:false><#A855F7><bold>AKARDOO NETWORK</bold></#A855F7>'
+      - '<italic:false><#A8B3C7>Explora todas las modalidades.</#A8B3C7>'
+      - '<italic:false><#303746> </#303746>'
+      - '<italic:false><#38D9FF>Click para abrir el selector</#38D9FF>'
     cooldown-ms: 500
     action: { type: menu, target: game-selector }
   - id: selector-lobbies
     slot: 1
     material: NETHER_STAR
     amount: 1
-    name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ Selector de lobbies</bold></gradient>'
+    name: '<italic:false><#38D9FF><bold>SELECTOR DE LOBBIES</bold></#38D9FF>'
     lore:
+      - '<italic:false><#A855F7><bold>CONEXIÓN</bold></#A855F7>'
       - '<italic:false><#A8B3C7>Elige otro punto de encuentro.</#A8B3C7>'
-      - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para abrir</#F8FAFC>'
+      - '<italic:false><#303746> </#303746>'
+      - '<italic:false><#38D9FF>Click para abrir el selector</#38D9FF>'
     cooldown-ms: 500
     action: { type: menu, target: lobby-selector }
   - id: perfil
     slot: 4
     material: PLAYER_HEAD
     amount: 1
-    name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Tu perfil</bold></gradient>'
+    name: '<italic:false><#38D9FF><bold>TU PERFIL</bold></#38D9FF>'
     lore:
-      - '<italic:false><#A8B3C7>Consulta tu resumen y preferencias.</#A8B3C7>'
-      - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para abrir</#F8FAFC>'
+      - '<italic:false><#A855F7><bold>RESUMEN PERSONAL</bold></#A855F7>'
+      - '<italic:false><#A8B3C7>Consulta tus datos y preferencias.</#A8B3C7>'
+      - '<italic:false><#303746> </#303746>'
+      - '<italic:false><#38D9FF>Click para abrir tu perfil</#38D9FF>'
     cooldown-ms: 500
     action: { type: menu, target: profile }
   - id: visibilidad
     slot: 7
     material: LIME_DYE
     amount: 1
-    name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Visibilidad</bold></gradient>'
+    name: '<italic:false><#38D9FF><bold>VISIBILIDAD</bold></#38D9FF>'
     lore:
-      - '<italic:false><#A8B3C7>Alterna entre todos, personal y nadie.</#A8B3C7>'
-      - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para cambiar</#F8FAFC>'
+      - '<italic:false><#A855F7><bold>JUGADORES</bold></#A855F7>'
+      - '<italic:false><#A8B3C7>Alterna entre todos, equipo y nadie.</#A8B3C7>'
+      - '<italic:false><#303746> </#303746>'
+      - '<italic:false><#38D9FF>Click para cambiar el modo</#38D9FF>'
     cooldown-ms: 500
     action: { type: visibility, target: cycle }
   - id: ajustes
     slot: 8
     material: COMPARATOR
     amount: 1
-    name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Ajustes</bold></gradient>'
+    name: '<italic:false><#38D9FF><bold>AJUSTES</bold></#38D9FF>'
     lore:
-      - '<italic:false><#A8B3C7>Personaliza tu experiencia en el lobby.</#A8B3C7>'
-      - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para abrir</#F8FAFC>'
+      - '<italic:false><#A855F7><bold>PREFERENCIAS</bold></#A855F7>'
+      - '<italic:false><#A8B3C7>Personaliza tu experiencia.</#A8B3C7>'
+      - '<italic:false><#303746> </#303746>'
+      - '<italic:false><#38D9FF>Click para abrir los ajustes</#38D9FF>'
     cooldown-ms: 500
     action: { type: menu, target: settings }

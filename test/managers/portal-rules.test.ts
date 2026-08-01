@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { LobbyPortal } from '../../src/configuration.js';
-import { normalizePortalSelection, selectPortal } from '../../src/domain/portals.js';
+import type { LobbyPortal } from '../../src/configuration/portals.js';
+import { normalizePortalSelection, selectPortal } from '../../src/managers/portal-rules.js';
 
 function portal(id: string, priority: number, enabled = true): LobbyPortal {
   return {

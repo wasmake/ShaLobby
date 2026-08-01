@@ -10,7 +10,7 @@ const MAX_RENDERED_MESSAGE_LENGTH = 32_767;
 
 export const COMMAND_MESSAGE_FALLBACKS = Object.freeze({
   prefix:
-    '<#303746>[</#303746><gradient:#38D9FF:#4F7CFF:#A855F7>ShaLobby</gradient><#303746>]</#303746> ',
+    '<#303746>[</#303746><gradient:#38D9FF:#4F7CFF:#A855F7>Akardoo</gradient><#303746>]</#303746> ',
   'command-error':
     '%prefix%<#FF5C7A>No se pudo completar la operación. Revisa el registro del servidor.</#FF5C7A>',
   'player-required': '%prefix%<#FF5C7A>Este comando necesita un jugador válido.</#FF5C7A>',

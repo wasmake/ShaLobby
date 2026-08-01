@@ -1,176 +1,17 @@
-import { pluginFiles } from '@shamoo/config';
-import { parse, stringify } from 'yaml';
+import { parse } from 'yaml';
 
-import { parseMessageDocument } from './messages.js';
-
-export const LOBBY_FILES = Object.freeze([
-  'config.yml',
-  'messages.yml',
-  'items.yml',
-  'menus.yml',
-  'scoreboard.yml',
-  'servers.yml',
-  'spawn.yml',
-  'portals.yml',
-] as const);
-
-export type LobbyFile = (typeof LOBBY_FILES)[number];
-
-export interface LobbyAction {
-  readonly type:
-    | 'none'
-    | 'spawn'
-    | 'connect'
-    | 'menu'
-    | 'visibility'
-    | 'title'
-    | 'sound'
-    | 'particle';
-  readonly target?: string;
-}
-
-export interface LobbyItem {
-  readonly id?: string;
-  readonly slot: number;
-  readonly material: string;
-  readonly amount: number;
-  readonly name: string;
-  readonly lore: readonly string[];
-  readonly 'cooldown-ms'?: number;
-  readonly action: LobbyAction;
-}
-
-export interface LobbyMenu {
-  readonly id: string;
-  readonly rows: number;
-  readonly title: string;
-  readonly slots: readonly LobbyItem[];
-}
-
-export interface LobbyPortal {
-  readonly id: string;
-  enabled: boolean;
-  readonly world: string;
-  readonly min: { readonly x: number; readonly y: number; readonly z: number };
-  readonly max: { readonly x: number; readonly y: number; readonly z: number };
-  readonly permission?: string;
-  readonly priority: number;
-  readonly 'cooldown-ms': number;
-  destination?: string;
-  action: LobbyAction;
-  readonly visualize: boolean;
-}
-
-export interface LobbySpawn {
-  configured: boolean;
-  world?: string;
-  x?: number;
-  y?: number;
-  z?: number;
-  yaw?: number;
-  pitch?: number;
-}
-
-export interface LobbyServer {
-  readonly id: string;
-  readonly enabled: boolean;
-  readonly target: string;
-  readonly 'display-name': string;
-}
-
-export interface LobbySidebar {
-  readonly enabled: boolean;
-  readonly 'interval-ticks': number;
-  readonly 'title-frames': readonly string[];
-  readonly lines: readonly string[];
-}
-
-export interface LobbyPresentation {
-  readonly bossbar: {
-    readonly enabled: boolean;
-    readonly color: 'BLUE' | 'GREEN' | 'PINK' | 'PURPLE' | 'RED' | 'WHITE' | 'YELLOW';
-    readonly overlay: 'PROGRESS' | 'NOTCHED_6' | 'NOTCHED_10' | 'NOTCHED_12' | 'NOTCHED_20';
-    readonly progress: number;
-    readonly 'frame-ticks': number;
-    readonly 'last-frame-ticks': number;
-    readonly 'title-frames': readonly string[];
-  };
-  readonly 'player-list': {
-    readonly enabled: boolean;
-    readonly header: string;
-    readonly footer: string;
-  };
-}
-
-export interface LobbyTitleAsset {
-  readonly title: string;
-  readonly subtitle: string;
-  readonly 'fade-in-ticks': number;
-  readonly 'stay-ticks': number;
-  readonly 'fade-out-ticks': number;
-}
-
-export interface LobbySoundAsset {
-  readonly sound: string;
-  readonly volume: number;
-  readonly pitch: number;
-}
-
-export interface LobbyParticleAsset {
-  readonly particle: string;
-  readonly count: number;
-  readonly 'offset-x': number;
-  readonly 'offset-y': number;
-  readonly 'offset-z': number;
-  readonly speed: number;
-}
-
-export interface LobbyMessageResources {
-  readonly messages: Readonly<Record<string, string>>;
-  readonly titles: Readonly<Record<string, LobbyTitleAsset>>;
-  readonly sounds: Readonly<Record<string, LobbySoundAsset>>;
-  readonly particles: Readonly<Record<string, LobbyParticleAsset>>;
-}
-
-export interface LobbySettings {
-  readonly join: {
-    readonly 'suppress-message': boolean;
-    readonly teleport: boolean;
-    readonly reset: boolean;
-    readonly 'welcome-title': string;
-    readonly 'welcome-sound': string;
-    readonly 'welcome-particle': string;
-    readonly 'welcome-message': string;
-  };
-  readonly 'void-rescue-y': number;
-  readonly protection: { readonly enabled: boolean; readonly 'bypass-permission': string };
-  readonly 'portal-cooldown-ms': number;
-  readonly 'enforcement-ticks': number;
-  readonly worlds: readonly {
-    readonly name: string;
-    readonly time: number;
-    readonly storm: boolean;
-    readonly thundering: boolean;
-    readonly 'game-rules': Readonly<Record<string, boolean | number>>;
-  }[];
-  readonly visibility: { readonly default: Visibility; readonly 'staff-permission': string };
-  readonly transfers: { readonly 'cooldown-ms': number };
-}
-
-export type Visibility = 'all' | 'staff' | 'none';
-
-export interface LobbyConfiguration {
-  readonly settings: LobbySettings;
-  readonly messagesContent: string;
-  readonly messageResources: LobbyMessageResources;
-  readonly items: readonly LobbyItem[];
-  readonly menus: readonly LobbyMenu[];
-  readonly sidebar: LobbySidebar;
-  readonly presentation: LobbyPresentation;
-  readonly servers: readonly LobbyServer[];
-  readonly spawn: LobbySpawn;
-  readonly portals: LobbyPortal[];
-}
+import type { LobbyAction } from './actions.js';
+import type { LobbyFile } from './files.js';
+import type { LobbyItem } from './items.js';
+import type { LobbyConfiguration } from './lobby-configuration.js';
+import type { LobbyMenu } from './menus.js';
+import type { LobbyParticleAsset, LobbySoundAsset, LobbyTitleAsset } from './message-resources.js';
+import type { LobbyPortal } from './portals.js';
+import type { LobbyPresentation, LobbySidebar } from './presentation.js';
+import type { LobbyServer } from './servers.js';
+import type { LobbySettings } from './settings.js';
+import type { LobbySpawn } from './spawn.js';
+import { parseMessageDocument } from '../messages/message-catalog.js';
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value))
@@ -413,29 +254,29 @@ const DEFAULT_PRESENTATION: LobbyPresentation = {
     'frame-ticks': 2,
     'last-frame-ticks': 60,
     'title-frames': [
-      '<gradient:#38D9FF:#A855F7><bold>T</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TI</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TIE</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TIEN</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TIEND</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TIENDA</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TIENDA S</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TIENDA SH</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHA</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHAL</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALO</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOB</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOBB</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOBBY</bold></gradient>',
-      '<gradient:#38D9FF:#A855F7><bold>TIENDA SHALOBBY</bold></gradient> <#F8FAFC>• Rangos, cosméticos y más</#F8FAFC>',
+      '<gradient:#38D9FF:#A855F7><bold>A</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AK</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AKA</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AKAR</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AKARD</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AKARDO</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AKARDOO</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AKARDOO N</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AKARDOO NE</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AKARDOO NET</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AKARDOO NETW</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AKARDOO NETWO</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AKARDOO NETWOR</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AKARDOO NETWORK</bold></gradient>',
+      '<gradient:#38D9FF:#A855F7><bold>AKARDOO NETWORK</bold></gradient> <#F8FAFC>• Tu próxima aventura</#F8FAFC>',
     ],
   },
   'player-list': {
     enabled: true,
     header:
-      '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>\n<#A8B3C7>Bienvenido, <#F8FAFC>%player%</#F8FAFC></#A8B3C7>',
+      '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ AKARDOO NETWORK ✦</bold></gradient>\n<#A8B3C7>Bienvenido, <#F8FAFC>%player%</#F8FAFC></#A8B3C7>',
     footer:
-      '<#A8B3C7>Jugadores en línea: <#F8FAFC>%online%</#F8FAFC></#A8B3C7>\n<#55FF88>¡Que disfrutes tu estancia!</#55FF88>',
+      '<#A8B3C7>Jugadores en línea: <#55FF88>%online%</#55FF88></#A8B3C7>\n<#38D9FF><bold>mc.akardoo.com</bold></#38D9FF>',
   },
 };
 
@@ -564,25 +405,20 @@ function validateReference(
   sounds: ReadonlySet<string>,
   particles: ReadonlySet<string>,
 ): void {
-  if (action.type === 'menu' && !menus.has(String(action.target)))
+  if (action.type === 'menu' && !menus.has(action.target))
     throw new TypeError(`${label} references an unknown menu.`);
-  if (action.type === 'connect' && !servers.has(String(action.target)))
+  if (action.type === 'connect' && !servers.has(action.target))
     throw new TypeError(`${label} references an unavailable server.`);
-  if (action.type === 'title' && !titles.has(String(action.target)))
+  if (action.type === 'title' && !titles.has(action.target))
     throw new TypeError(`${label} references an unknown title.`);
-  if (action.type === 'sound' && !sounds.has(String(action.target)))
+  if (action.type === 'sound' && !sounds.has(action.target))
     throw new TypeError(`${label} references an unknown sound.`);
-  if (action.type === 'particle' && !particles.has(String(action.target)))
+  if (action.type === 'particle' && !particles.has(action.target))
     throw new TypeError(`${label} references an unknown particle.`);
 }
 
-export class LobbyConfigurationStore {
-  public async load(): Promise<LobbyConfiguration> {
-    const contents = Object.fromEntries(
-      await Promise.all(
-        LOBBY_FILES.map(async (file) => [file, await pluginFiles.read(`data/${file}`)] as const),
-      ),
-    ) as Record<LobbyFile, string>;
+export class LobbyConfigurationDecoder {
+  public decode(contents: Readonly<Record<LobbyFile, string>>): LobbyConfiguration {
     const settings = parsed(contents['config.yml'], 'config.yml');
     const itemValues = array(
       parsed(contents['items.yml'], 'items.yml')['items'],
@@ -680,11 +516,17 @@ export class LobbyConfigurationStore {
     for (const [index, value] of menuValues.entries()) {
       const label = `menus.yml.menus[${String(index)}]`;
       const menu = record(value, label);
-      keys(menu, label, ['id', 'rows', 'title', 'slots']);
+      keys(menu, label, ['id', 'rows', 'title', 'slots'], ['filler']);
       const rows = integer(menu['rows'], `${label}.rows`, 1, 6);
       text(menu['title'], `${label}.title`);
       const slots = array(menu['slots'], `${label}.slots`);
       validateItems(slots, `${label}.slots`, rows * 9 - 1);
+      if (menu['filler'] !== undefined)
+        validateItems(
+          [{ ...record(menu['filler'], `${label}.filler`), slot: 0, action: { type: 'none' } }],
+          `${label}.filler`,
+          0,
+        );
     }
     for (const [index, value] of serverValues.entries()) {
       const label = `servers.yml.servers[${String(index)}]`;
@@ -797,13 +639,5 @@ export class LobbyConfigurationStore {
         ...record(portal, 'portal'),
       })) as unknown as LobbyPortal[],
     });
-  }
-
-  public writeSpawn(spawn: LobbySpawn): Promise<void> {
-    return pluginFiles.write('data/spawn.yml', stringify({ spawn }));
-  }
-
-  public writePortals(portals: readonly LobbyPortal[]): Promise<void> {
-    return pluginFiles.write('data/portals.yml', stringify({ portals }));
   }
 }

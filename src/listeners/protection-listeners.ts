@@ -28,8 +28,6 @@ import {
   OnFoodLevelChangeEvent,
   OnHangingBreakEvent,
   OnHangingPlaceEvent,
-  OnInventoryClickEvent,
-  OnInventoryDragEvent,
   OnInventoryMoveItemEvent,
   OnInventoryPickupItemEvent,
   OnLeavesDecayEvent,
@@ -38,17 +36,12 @@ import {
   OnPlayerBucketEmptyEvent,
   OnPlayerBucketFillEvent,
   OnPlayerDropItemEvent,
-  OnPlayerInteractEvent,
   OnPlayerInteractAtEntityEvent,
   OnPlayerInteractEntityEvent,
   OnPlayerItemConsumeEvent,
   OnPlayerItemDamageEvent,
-  OnPlayerJoinEvent,
   OnPlayerLeashEntityEvent,
-  OnPlayerMoveEvent,
   OnPlayerPortalEvent,
-  OnPlayerQuitEvent,
-  OnPlayerRespawnEvent,
   OnPlayerShearEntityEvent,
   OnPlayerSwapHandItemsEvent,
   OnPortalCreateEvent,
@@ -67,63 +60,21 @@ import {
   type EntityDamageEvent,
   type EntityPickupItemEvent,
   type FoodLevelChangeEvent,
-  type InventoryClickEvent,
-  type InventoryDragEvent,
   type PaperHandle,
   type PlayerDropItemEvent,
-  type PlayerInteractEvent,
-  type PlayerJoinEvent,
-  type PlayerMoveEvent,
-  type PlayerQuitEvent,
-  type PlayerRespawnEvent,
   type ThunderChangeEvent,
   type WeatherChangeEvent,
 } from '@shamoo/paper-raw';
 
-import { call, callExact, type Ref } from './api.js';
-import { shaLobbyRuntime } from './lobby.js';
+import { paperLobbyHandler } from '../composition.js';
+import { call, callExact, type Ref } from '../platform/paper/api.js';
 
 @Component()
-export class LobbyEvents {
-  @OnPlayerJoinEvent()
-  public join(@Context() event: PaperHandle<PlayerJoinEvent>): Promise<void> {
-    return shaLobbyRuntime.join(event);
-  }
-
-  @OnPlayerRespawnEvent()
-  public respawn(@Context() event: PaperHandle<PlayerRespawnEvent>): Promise<void> {
-    return shaLobbyRuntime.respawn(event);
-  }
-
-  @OnPlayerQuitEvent()
-  public quit(@Context() event: PaperHandle<PlayerQuitEvent>): Promise<void> {
-    return shaLobbyRuntime.quit(event);
-  }
-
-  @OnPlayerMoveEvent('MONITOR')
-  public move(@Context() event: PaperHandle<PlayerMoveEvent>): Promise<void> {
-    return shaLobbyRuntime.move(event);
-  }
-
-  @OnPlayerInteractEvent('HIGHEST')
-  public interact(@Context() event: PaperHandle<PlayerInteractEvent>): Promise<void> {
-    return shaLobbyRuntime.interact(event);
-  }
-
-  @OnInventoryClickEvent('HIGHEST')
-  public inventoryClick(@Context() event: PaperHandle<InventoryClickEvent>): Promise<void> {
-    return shaLobbyRuntime.inventoryClick(event);
-  }
-
-  @OnInventoryDragEvent('HIGHEST')
-  public inventoryDrag(@Context() event: PaperHandle<InventoryDragEvent>): Promise<void> {
-    return shaLobbyRuntime.inventoryDrag(event);
-  }
-
+export class ProtectionListeners {
   @OnEntityDamageEvent('HIGHEST')
   public async damage(@Context() event: PaperHandle<EntityDamageEvent>): Promise<void> {
     const entity = await callExact<PaperHandle>(event, 'getEntity', '()Lorg/bukkit/entity/Entity;');
-    await shaLobbyRuntime.protect(
+    await paperLobbyHandler.protect(
       event,
       await call<PaperHandle>(entity, 'getWorld'),
       entity.$type === 'org.bukkit.entity.Player'
@@ -135,7 +86,7 @@ export class LobbyEvents {
   @OnFoodLevelChangeEvent('HIGHEST')
   public async food(@Context() event: PaperHandle<FoodLevelChangeEvent>): Promise<void> {
     const entity = await callExact<PaperHandle>(event, 'getEntity', '()Lorg/bukkit/entity/Entity;');
-    await shaLobbyRuntime.protect(
+    await paperLobbyHandler.protect(
       event,
       await call<PaperHandle>(entity, 'getWorld'),
       entity.$type === 'org.bukkit.entity.Player'
@@ -146,7 +97,7 @@ export class LobbyEvents {
 
   @OnBlockBreakEvent('HIGHEST')
   public async blockBreak(@Context() event: PaperHandle<BlockBreakEvent>): Promise<void> {
-    await shaLobbyRuntime.protect(
+    await paperLobbyHandler.protect(
       event,
       await call<PaperHandle>(await call<PaperHandle>(event, 'getBlock'), 'getWorld'),
       await call<Ref<'org.bukkit.entity.Player'>>(event, 'getPlayer'),
@@ -155,7 +106,7 @@ export class LobbyEvents {
 
   @OnBlockPlaceEvent('HIGHEST')
   public async blockPlace(@Context() event: PaperHandle<BlockPlaceEvent>): Promise<void> {
-    await shaLobbyRuntime.protect(
+    await paperLobbyHandler.protect(
       event,
       await call<PaperHandle>(await call<PaperHandle>(event, 'getBlock'), 'getWorld'),
       await call<Ref<'org.bukkit.entity.Player'>>(event, 'getPlayer'),
@@ -164,7 +115,7 @@ export class LobbyEvents {
 
   @OnPlayerDropItemEvent('HIGHEST')
   public async drop(@Context() event: PaperHandle<PlayerDropItemEvent>): Promise<void> {
-    await shaLobbyRuntime.protect(
+    await paperLobbyHandler.protect(
       event,
       await call<PaperHandle>(
         await call<Ref<'org.bukkit.entity.Player'>>(event, 'getPlayer'),
@@ -177,7 +128,7 @@ export class LobbyEvents {
   @OnEntityPickupItemEvent('HIGHEST')
   public async pickup(@Context() event: PaperHandle<EntityPickupItemEvent>): Promise<void> {
     const entity = await callExact<PaperHandle>(event, 'getEntity', '()Lorg/bukkit/entity/Entity;');
-    await shaLobbyRuntime.protect(
+    await paperLobbyHandler.protect(
       event,
       await call<PaperHandle>(entity, 'getWorld'),
       entity.$type === 'org.bukkit.entity.Player'
@@ -199,7 +150,7 @@ export class LobbyEvents {
       '()Lorg/bukkit/entity/Entity;',
     );
     if (target !== null && target.$type === 'org.bukkit.entity.Player')
-      await shaLobbyRuntime.protect(
+      await paperLobbyHandler.protect(
         event,
         await call<PaperHandle>(target, 'getWorld'),
         target as Ref<'org.bukkit.entity.Player'>,
@@ -214,7 +165,7 @@ export class LobbyEvents {
     const destinationLocation = await call<PaperHandle | null>(destination, 'getLocation');
     const location = sourceLocation ?? destinationLocation;
     if (location !== null)
-      await shaLobbyRuntime.protect(event, await call<PaperHandle>(location, 'getWorld'));
+      await paperLobbyHandler.protect(event, await call<PaperHandle>(location, 'getWorld'));
   }
 
   @OnInventoryPickupItemEvent('HIGHEST')
@@ -222,7 +173,7 @@ export class LobbyEvents {
     const inventory = await call<PaperHandle>(event, 'getInventory');
     const location = await call<PaperHandle | null>(inventory, 'getLocation');
     if (location !== null)
-      await shaLobbyRuntime.protect(event, await call<PaperHandle>(location, 'getWorld'));
+      await paperLobbyHandler.protect(event, await call<PaperHandle>(location, 'getWorld'));
   }
 
   @OnPlayerSwapHandItemsEvent('HIGHEST')
@@ -291,13 +242,13 @@ export class LobbyEvents {
   public async attributedBlockPolicy(@Context() event: PaperHandle): Promise<void> {
     const block = await call<PaperHandle>(event, 'getBlock');
     const actor = await this.optionalPlayer(event, ['getPlayer', 'getEntity', 'getPrimingEntity']);
-    await shaLobbyRuntime.protect(event, await call<PaperHandle>(block, 'getWorld'), actor);
+    await paperLobbyHandler.protect(event, await call<PaperHandle>(block, 'getWorld'), actor);
   }
 
   @OnEntityExplodeEvent('HIGHEST')
   public async entityExplode(@Context() event: PaperHandle): Promise<void> {
     const location = await call<PaperHandle>(event, 'getLocation');
-    await shaLobbyRuntime.protect(event, await call<PaperHandle>(location, 'getWorld'));
+    await paperLobbyHandler.protect(event, await call<PaperHandle>(location, 'getWorld'));
   }
 
   @OnEntityPlaceEvent('HIGHEST')
@@ -316,13 +267,13 @@ export class LobbyEvents {
   public async vehiclePolicy(@Context() event: PaperHandle): Promise<void> {
     const vehicle = await call<PaperHandle>(event, 'getVehicle');
     const actor = await this.optionalPlayer(event, ['getAttacker', 'getEntity', 'getEntered']);
-    await shaLobbyRuntime.protect(event, await call<PaperHandle>(vehicle, 'getWorld'), actor);
+    await paperLobbyHandler.protect(event, await call<PaperHandle>(vehicle, 'getWorld'), actor);
   }
 
   @OnStructureGrowEvent('HIGHEST')
   @OnPortalCreateEvent('HIGHEST')
   public async worldPolicy(@Context() event: PaperHandle): Promise<void> {
-    await shaLobbyRuntime.protect(
+    await paperLobbyHandler.protect(
       event,
       await call<PaperHandle>(event, 'getWorld'),
       await this.optionalPlayer(event, ['getPlayer', 'getEntity']),
@@ -343,7 +294,7 @@ export class LobbyEvents {
 
   @OnWeatherChangeEvent('HIGHEST')
   public async weather(@Context() event: PaperHandle<WeatherChangeEvent>): Promise<void> {
-    await shaLobbyRuntime.protectWeather(
+    await paperLobbyHandler.protectWeather(
       event,
       await call<PaperHandle>(event, 'getWorld'),
       'storm',
@@ -353,7 +304,7 @@ export class LobbyEvents {
 
   @OnThunderChangeEvent('HIGHEST')
   public async thunder(@Context() event: PaperHandle<ThunderChangeEvent>): Promise<void> {
-    await shaLobbyRuntime.protectWeather(
+    await paperLobbyHandler.protectWeather(
       event,
       await call<PaperHandle>(event, 'getWorld'),
       'thundering',
@@ -363,12 +314,12 @@ export class LobbyEvents {
 
   private async protectPlayer(event: PaperHandle): Promise<void> {
     const player = await call<Ref<'org.bukkit.entity.Player'>>(event, 'getPlayer');
-    await shaLobbyRuntime.protect(event, await call<PaperHandle>(player, 'getWorld'), player);
+    await paperLobbyHandler.protect(event, await call<PaperHandle>(player, 'getWorld'), player);
   }
 
   private async protectBlock(event: PaperHandle): Promise<void> {
     const block = await call<PaperHandle>(event, 'getBlock');
-    await shaLobbyRuntime.protect(event, await call<PaperHandle>(block, 'getWorld'));
+    await paperLobbyHandler.protect(event, await call<PaperHandle>(block, 'getWorld'));
   }
 
   private async protectEntity(event: PaperHandle): Promise<void> {
@@ -379,7 +330,7 @@ export class LobbyEvents {
         ? '()Lorg/bukkit/entity/Hanging;'
         : '()Lorg/bukkit/entity/Entity;',
     );
-    await shaLobbyRuntime.protect(
+    await paperLobbyHandler.protect(
       event,
       await call<PaperHandle>(entity, 'getWorld'),
       entity.$type === 'org.bukkit.entity.Player'

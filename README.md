@@ -44,11 +44,16 @@ reload.
 
 ## Implementation
 
-- `src/events.ts`: generated Paper event subscriptions and synchronous protection handlers
-- `src/lobby.ts`: player lifecycle, items, menus, animated presentation, portals, and transfers
-- `src/api.ts`: small typed helpers over `paperJava`
-- `src/configuration.ts`: YAML loading, validation, and persistence
-- `src/commands.ts`: Spanish command surface
+- `src/listeners/`: separate lifecycle, interaction, and protection event components
+- `src/commands/`: separate spawn, item, menu, runtime, and portal command components
+- `src/managers/`: portal persistence, portal sessions, visibility, and pure portal rules
+- `src/handlers/`: lobby lifecycle and managed-operation coordination
+- `src/providers/`: active configuration, YAML storage, and portal persistence implementations
+- `src/configuration/`: per-object models plus strict cross-file decoding
+- `src/platform/paper/`: Paper bridge, plugin lifecycle, and Folia-aware handler
+- `src/api/`: managed-lobby contracts and provider interfaces
+- `src/messages/`: message catalog and console logging
+- `src/composition.ts`: concrete dependency wiring
 - `defaults/`: initial persistent configuration
 
 See [Architecture](docs/ARCHITECTURE.md), [Configuration](docs/CONFIGURATION.md), and

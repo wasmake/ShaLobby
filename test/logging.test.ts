@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { logStartupComplete } from '../src/logging.js';
+import { logStartupComplete } from '../src/messages/console-logger.js';
 
 afterEach(() => vi.restoreAllMocks());
 

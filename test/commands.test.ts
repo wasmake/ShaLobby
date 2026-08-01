@@ -4,13 +4,13 @@ import type { CommandSender, Player } from '@shamoo/commands';
 import type { PaperCommandContext, TextLike } from '@shamoo/paper';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  LobbyAdministrationCommands,
-  LobbyPortalCommands,
-  LobbySpawnCommands,
-} from '../src/commands.js';
-import { MANAGED_LOBBY_FILES, type ManagedLobbyRequest } from '../src/managed-lobby.js';
-import { shaLobbyRuntime } from '../src/lobby.js';
+import { LobbyItemCommands } from '../src/commands/item-commands.js';
+import { LobbyMenuCommands } from '../src/commands/menu-commands.js';
+import { LobbyPortalCommands } from '../src/commands/portal-commands.js';
+import { LobbyRuntimeCommands } from '../src/commands/runtime-commands.js';
+import { LobbySpawnCommands } from '../src/commands/spawn-commands.js';
+import { MANAGED_LOBBY_FILES, type ManagedLobbyRequest } from '../src/api/managed-lobby.js';
+import { paperLobbyHandler } from '../src/composition.js';
 
 const SELF = '123e4567-e89b-12d3-a456-426614174000';
 const TARGET = '123e4567-e89b-12d3-a456-426614174001';
@@ -45,8 +45,8 @@ function commandContext(
 }
 
 function installHost(operation: (request: ManagedLobbyRequest) => Promise<unknown>): void {
-  vi.spyOn(shaLobbyRuntime, 'request').mockImplementation(
-    operation as typeof shaLobbyRuntime.request,
+  vi.spyOn(paperLobbyHandler, 'request').mockImplementation(
+    operation as typeof paperLobbyHandler.request,
   );
 }
 
@@ -266,7 +266,8 @@ describe('managed lobby commands', () => {
     const self = commandContext();
     const target: Player = { id: TARGET, name: 'Steve', online: true };
     const spawn = new LobbySpawnCommands();
-    const admin = new LobbyAdministrationCommands();
+    const items = new LobbyItemCommands();
+    const menus = new LobbyMenuCommands();
     const portals = new LobbyPortalCommands();
 
     await spawn.lobby(self.context);
@@ -274,9 +275,9 @@ describe('managed lobby commands', () => {
     await spawn.hub(self.context);
     await spawn.spawnPlayer(target, self.context);
     await spawn.setSpawn(self.context);
-    await admin.giveItems(self.context);
-    await admin.resetItems(self.context, target);
-    await admin.openMenu('game-selector', self.context, target);
+    await items.giveItems(self.context);
+    await items.resetItems(self.context, target);
+    await menus.openMenu('game-selector', self.context, target);
     await portals.wand(self.context);
     await portals.setPositionOne(self.context);
     await portals.setPositionTwo(self.context);
@@ -378,7 +379,7 @@ describe('managed lobby commands', () => {
       return Promise.resolve(successfulResponse(request));
     });
     const fake = commandContext({ kind: 'console', name: 'Console' });
-    const commands = new LobbyAdministrationCommands();
+    const commands = new LobbyRuntimeCommands();
 
     await commands.reload(fake.context);
     await commands.status(fake.context);
@@ -415,7 +416,7 @@ describe('managed lobby commands', () => {
       });
     });
     const fake = commandContext({ kind: 'console', name: 'Console' });
-    const commands = new LobbyAdministrationCommands();
+    const commands = new LobbyRuntimeCommands();
 
     await commands.status(fake.context);
     await commands.debug(fake.context);
@@ -584,7 +585,7 @@ describe('managed lobby commands', () => {
     const target: Player = { id: TARGET, name: 'Steve', online: true };
     const portals = new LobbyPortalCommands();
 
-    await new LobbyAdministrationCommands().openMenu('Not Valid', fake.context, target);
+    await new LobbyMenuCommands().openMenu('Not Valid', fake.context, target);
     await portals.create(
       'main',
       fake.context,
@@ -646,7 +647,7 @@ describe('managed lobby commands', () => {
     installHost(operation);
     const fake = commandContext({ kind: 'console', name: 'Console' });
 
-    await new LobbyAdministrationCommands().giveItems(fake.context);
+    await new LobbyItemCommands().giveItems(fake.context);
 
     expect(operation).not.toHaveBeenCalled();
     expect(replyContent(fake.replies[0])).toContain('necesita un jugador válido');

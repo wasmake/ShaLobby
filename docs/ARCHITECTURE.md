@@ -25,19 +25,36 @@ ShamooRuntime responsibilities:
 
 ## Internal Boundaries
 
-ShaLobby follows one dependency direction:
+ShaLobby uses feature-oriented OOP packages with explicit ownership:
 
-1. `application.ts` owns plugin startup, reload, and shutdown.
-2. `commands.ts` and `events.ts` adapt framework input into lobby operations.
-3. `lobby.ts` coordinates stateful use cases and Paper resources.
-4. `domain/` contains synchronous business rules with no Paper handles or file access.
-5. `configuration.ts` builds the validated snapshot consumed by the runtime.
-6. `api.ts` is the low-level generated Paper bridge boundary.
+```text
+commands/listeners/platform -> handlers/managers -> api
+                                  ^               ^
+                                  |               |
+                              providers ---------+
+```
+
+- `listeners/` separates player lifecycle, interaction/inventory, and protection event adapters; no
+  listener owns gameplay state.
+- `commands/` separates spawn, item, menu, runtime, and portal command objects. Only generic
+  validation, execution, and safe error mapping are shared through `command-support.ts`.
+- `managers/` owns stateful business behavior. `PortalManager` owns persisted portal mutations,
+  `PortalSessionManager` owns selections, occupancy, cooldowns, and visualization, and
+  `VisibilityManager` owns visibility transitions and relationship decisions.
+- `handlers/` coordinates lifecycle and managed operations without constructing concrete providers.
+- `providers/` separates the active snapshot, YAML file storage, and portal persistence interfaces.
+- `configuration/` separates each model concern and keeps strict cross-file decoding independent
+  from storage.
+- `platform/paper/` owns Paper handles, Folia scheduling, generated JVM calls, and plugin callbacks.
+- `api/` contains managed-lobby contracts and provider interfaces used across packages.
+- `messages/` owns configured player messages and console logging.
+- `composition.ts` is the only module that constructs concrete managers, providers, and handlers.
+- `paper.ts` exports only framework-discoverable plugin, command, and listener components.
 
 Configuration values are decoded once. In particular, message templates, titles, sounds, and
 particles are retained as immutable typed resources; gameplay code must not reinterpret raw YAML.
-Expected domain decisions should be represented as typed results, while exceptions are reserved for
-invalid configuration or infrastructure failures.
+Invalid action combinations are excluded by discriminated configuration types, and persistence is
+performed through provider interfaces rather than directly by commands or listeners.
 
 ## Paper Calls
 

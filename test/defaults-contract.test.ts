@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { parseDocument } from 'yaml';
 import { describe, expect, it } from 'vitest';
 
-import { COMMAND_MESSAGE_FALLBACKS } from '../src/messages.js';
+import { COMMAND_MESSAGE_FALLBACKS } from '../src/messages/message-catalog.js';
 
 const DEFAULT_FILES = Object.freeze([
   'config.yml',
@@ -238,11 +238,49 @@ async function buildHashes(): Promise<Readonly<Record<string, string>>> {
   expect((await readdir(DIST)).sort()).toEqual([...DIST_FILES, 'data'].sort());
   expect((await readdir(resolve(DIST, 'data'))).sort()).toEqual([...DEFAULT_FILES].sort());
   const manifest: unknown = JSON.parse(await readFile(resolve(DIST, 'shamoo-plugin.json'), 'utf8'));
+  const manifestRoot = mapping(manifest, 'manifest');
   const paper = mapping(
-    mapping(mapping(manifest, 'manifest')['platforms'], 'manifest.platforms')['paper'],
+    mapping(manifestRoot['platforms'], 'manifest.platforms')['paper'],
     'manifest.platforms.paper',
   );
   expect(paper).toMatchObject({ enabled: true, minecraft: '26.2', paperApi: '26.2' });
+  const commandComponents = sequence(
+    mapping(manifestRoot['compiler'], 'manifest.compiler')['components'],
+    'manifest.compiler.components',
+  )
+    .map((component, index) => mapping(component, `manifest.compiler.components[${String(index)}]`))
+    .filter((component) => String(component['file']).startsWith('src/commands/'))
+    .map((component) => text(component['name'], 'manifest command component name'))
+    .sort();
+  expect(commandComponents).toEqual(
+    [
+      'LobbyItemCommands',
+      'LobbyMenuCommands',
+      'LobbyPortalCommands',
+      'LobbyRuntimeCommands',
+      'LobbySpawnCommands',
+    ].sort(),
+  );
+  const componentNames = sequence(
+    mapping(manifestRoot['compiler'], 'manifest.compiler')['components'],
+    'manifest.compiler.components',
+  )
+    .map((component, index) => mapping(component, `manifest.compiler.components[${String(index)}]`))
+    .map((component) => text(component['name'], 'manifest component name'))
+    .sort();
+  expect(componentNames).toEqual(
+    [
+      'InteractionListeners',
+      'LobbyItemCommands',
+      'LobbyMenuCommands',
+      'LobbyPortalCommands',
+      'LobbyRuntimeCommands',
+      'LobbySpawnCommands',
+      'PlayerLifecycleListeners',
+      'ProtectionListeners',
+      'ShaLobbyPlugin',
+    ].sort(),
+  );
   const bundle = await readFile(resolve(DIST, 'index.js'), 'utf8');
   expect(bundle).not.toContain('Dynamic require of "');
   expect(bundle).not.toMatch(
@@ -336,8 +374,8 @@ describe('managed lobby defaults contract', () => {
       'scoreboard.yml.presentation.bossbar.title-frames',
     );
     expect(bossbarFrames).toHaveLength(15);
-    expect(bossbarFrames[0]).toContain('>T<');
-    expect(bossbarFrames.at(-1)).toContain('TIENDA SHALOBBY');
+    expect(bossbarFrames[0]).toContain('>A<');
+    expect(bossbarFrames.at(-1)).toContain('AKARDOO NETWORK');
     const playerList = mapping(
       presentation['player-list'],
       'scoreboard.yml.presentation.player-list',
@@ -421,6 +459,9 @@ describe('managed lobby defaults contract', () => {
       const rows = integer(menu['rows'], `menus.yml.menus[${String(menuIndex)}].rows`);
       expect(rows).toBeGreaterThanOrEqual(1);
       expect(rows).toBeLessThanOrEqual(6);
+      const filler = mapping(menu['filler'], `menus.yml.menus[${String(menuIndex)}].filler`);
+      expect(filler['material']).toBe('GRAY_STAINED_GLASS_PANE');
+      nonItalicItem(filler, `menus.yml.menus[${String(menuIndex)}].filler`);
       const slots = new Set<number>();
       for (const [slotIndex, slotEntry] of sequence(
         menu['slots'],
@@ -434,6 +475,11 @@ describe('managed lobby defaults contract', () => {
           `menus[${String(menuIndex)}].slots[${String(slotIndex)}].action`,
           references,
         );
+        const action = mapping(slot['action'], `menus.slots[${String(slotIndex)}].action`);
+        if (action['type'] !== 'none') {
+          const lore = sequence(slot['lore'], `menus.slots[${String(slotIndex)}].lore`);
+          expect(lore.at(-1), `menus.slots[${String(slotIndex)}] CTA`).toMatch(/<#38D9FF>Click /u);
+        }
       }
     }
 

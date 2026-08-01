@@ -9,7 +9,7 @@ import {
   playerUniqueId,
   registerOutgoingPluginChannel,
   type Ref,
-} from '../src/api.js';
+} from '../src/platform/paper/api.js';
 
 const originalHost = Object.getOwnPropertyDescriptor(globalThis, 'host');
 
